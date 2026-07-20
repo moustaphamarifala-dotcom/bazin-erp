@@ -84,6 +84,7 @@ export default function BazinApp() {
   const [docs, setDocs] = useState([]);
   const [depenses, setDepenses] = useState([]);
   const [teintures, setTeintures] = useState([]);
+  const [commandes, setCommandes] = useState([]);
 
   /* ---- chargement initial ---- */
   useEffect(() => {
@@ -96,13 +97,14 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d, dep, t] = await Promise.all([
+      const [c, f, s, d, dep, t, cmd] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
         load("bazin:documents", []),
         load("bazin:depenses", []),
         load("bazin:teintures", []),
+        load("bazin:commandes", []),
       ]);
       setClients(c);
       setFournisseurs(f);
@@ -110,6 +112,7 @@ export default function BazinApp() {
       setDocs(d);
       setDepenses(dep);
       setTeintures(t);
+      setCommandes(cmd);
       setLoading(false);
     })();
   }, []);
@@ -130,6 +133,7 @@ export default function BazinApp() {
   const saveDocs = (next) => { setDocs(next); persist("bazin:documents", next); };
   const saveDepenses = (next) => { setDepenses(next); persist("bazin:depenses", next); };
   const saveTeintures = (next) => { setTeintures(next); persist("bazin:teintures", next); };
+  const saveCommandes = (next) => { setCommandes(next); persist("bazin:commandes", next); };
 
   /* ---- dérivés ---- */
   const lowStock = stock.filter((s) => Number(s.quantite) <= Number(s.seuilAlerte));
@@ -205,6 +209,7 @@ export default function BazinApp() {
             ["docs", "Factures & devis"],
             ["depenses", "Dépenses"],
             ["teintures", "Teinturiers"],
+            ["commandes", "Commandes de bazins"],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -267,6 +272,9 @@ export default function BazinApp() {
         )}
         {tab === "teintures" && (
           <TeinturesView teintures={teintures} saveTeintures={saveTeintures} />
+        )}
+        {tab === "commandes" && (
+          <CommandesView commandes={commandes} saveCommandes={saveCommandes} />
         )}
       </main>
     </div>
@@ -1493,6 +1501,240 @@ function TeinturesView({ teintures, saveTeintures }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ============================================================ */
+function CommandesView({ commandes, saveCommandes }) {
+  const [query, setQuery] = useState("");
+
+  const typesCommande = [
+    "Bazin vainqueur Siri Siri",
+    "Bazin vainqueur VIP",
+    "Bazin vainqueur Facebook",
+    "Teinture unique",
+    "Teinture modèle",
+    "Teinture VIP",
+    "Teinture Facebook",
+  ];
+  const qualitesDonnees = [
+    "Vainqueur blanc",
+    "Moins riche blanc",
+    "Riche blanc",
+    "Habillement femme",
+    "Habillement homme",
+  ];
+
+  const cellText = "w-full bg-transparent px-2 py-1.5 text-sm text-[#1B2430] border border-transparent rounded-sm focus:outline-none focus:border-[#1F6F5C] focus:bg-white";
+  const cellSelect = cellText + " cursor-pointer";
+
+  const estTeinture = (c) => (c.typeCommande || "").startsWith("Teinture");
+  const totalDe = (c) => (Number(c.metrage) || 0) * (Number(c.prixMetre) || 0);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return commandes;
+    return commandes.filter((c) =>
+      [c.client, c.telephone, c.commandeChez, c.typeCommande, c.qualiteDonnee, c.notes]
+        .some((v) => (v || "").toLowerCase().includes(q))
+    );
+  }, [commandes, query]);
+
+  const nonRetirees = commandes.filter((c) => c.statut !== "retiree").length;
+  const totalMontant = filtered.reduce((s, c) => s + totalDe(c), 0);
+
+  const update = (id, patch) =>
+    saveCommandes(commandes.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+
+  const changerStatut = (id, statut) => {
+    const c = commandes.find((x) => x.id === id);
+    const patch = { statut };
+    if (statut === "retiree" && !(c && c.dateRetiree)) patch.dateRetiree = today();
+    if (statut !== "retiree") patch.dateRetiree = "";
+    update(id, patch);
+  };
+
+  const addRow = () =>
+    saveCommandes([
+      ...commandes,
+      {
+        id: uid(),
+        date: today(),
+        client: "",
+        telephone: "",
+        commandeChez: "",
+        typeCommande: typesCommande[0],
+        qualiteDonnee: "",
+        metrage: "",
+        prixMetre: "",
+        dateRetrait: "",
+        statut: "en_attente",
+        dateRetiree: "",
+        notes: "",
+      },
+    ]);
+
+  const remove = (id) => saveCommandes(commandes.filter((c) => c.id !== id));
+
+  const exportCommandes = () =>
+    exportCSV(
+      "bazin-commandes.csv",
+      commandes.map((c) => ({
+        ...c,
+        statut: c.statut === "retiree" ? "Oui" : "Non",
+        total: totalDe(c),
+      })),
+      [
+        { key: "date", label: "Date de la commande" },
+        { key: "client", label: "Personne qui a passé la commande" },
+        { key: "telephone", label: "Numéro" },
+        { key: "commandeChez", label: "Commande faite à" },
+        { key: "typeCommande", label: "Type de commande" },
+        { key: "qualiteDonnee", label: "Qualité de bazin donnée (teinture)" },
+        { key: "metrage", label: "Métrage (m)" },
+        { key: "prixMetre", label: "Prix par métrage (F CFA)" },
+        { key: "total", label: "Total (F CFA)" },
+        { key: "dateRetrait", label: "Jour de retrait prévu" },
+        { key: "statut", label: "Retirée" },
+        { key: "dateRetiree", label: "Jour du retrait effectif" },
+        { key: "notes", label: "Notes" },
+      ]
+    );
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="bz-serif text-3xl font-semibold">Commandes de bazins</h1>
+          <p className="bz-sans text-[#5B5F55]">
+            {commandes.length} commande(s) · {nonRetirees} pas encore retirée(s) · total : <span className="bz-mono">{fcfa(totalMontant)}</span>
+          </p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <SearchBox value={query} onChange={setQuery} placeholder="Rechercher une commande…" />
+          <button onClick={exportCommandes}
+            className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
+            Exporter CSV
+          </button>
+          <button onClick={addRow}
+            className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+            + Nouvelle commande
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
+        <table className="w-full text-sm bz-sans" style={{ minWidth: "1420px" }}>
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+              <th className="px-3 py-3 w-36">Date commande</th>
+              <th className="px-3 py-3">Client</th>
+              <th className="px-3 py-3 w-32">Numéro</th>
+              <th className="px-3 py-3">Commande faite à</th>
+              <th className="px-3 py-3 w-52">Type de commande</th>
+              <th className="px-3 py-3 w-44">Qualité donnée</th>
+              <th className="px-3 py-3 w-24">Métrage</th>
+              <th className="px-3 py-3 w-28">Prix / m</th>
+              <th className="px-3 py-3 w-28 text-right">Total</th>
+              <th className="px-3 py-3 w-36">Retrait prévu</th>
+              <th className="px-3 py-3 w-24">Retirée ?</th>
+              <th className="px-3 py-3 w-36">Jour du retrait</th>
+              <th className="px-3 py-3 w-10"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan="13" className="px-5 py-6 text-[#9AA0A6]">
+                  {commandes.length === 0
+                    ? "Aucune commande. Cliquez sur « + Nouvelle commande » et remplissez les cases directement, comme dans Excel."
+                    : "Aucun résultat pour cette recherche."}
+                </td>
+              </tr>
+            )}
+            {filtered.map((c) => (
+              <tr key={c.id}
+                className={`border-b border-[#EFEBDF] last:border-0 ${c.statut === "retiree" ? "" : "bg-[#FDF8EF]"}`}>
+                <td className="px-1 py-1">
+                  <input type="date" className={cellText + " bz-mono"} value={c.date || ""}
+                    onChange={(e) => update(c.id, { date: e.target.value })} />
+                </td>
+                <td className="px-1 py-1">
+                  <input className={cellText + " font-medium"} placeholder="Nom du client" value={c.client || ""}
+                    onChange={(e) => update(c.id, { client: e.target.value })} />
+                </td>
+                <td className="px-1 py-1">
+                  <input className={cellText + " bz-mono"} placeholder="Téléphone" value={c.telephone || ""}
+                    onChange={(e) => update(c.id, { telephone: e.target.value })} />
+                </td>
+                <td className="px-1 py-1">
+                  <input className={cellText} placeholder="À qui on fait la commande" value={c.commandeChez || ""}
+                    onChange={(e) => update(c.id, { commandeChez: e.target.value })} />
+                </td>
+                <td className="px-1 py-1">
+                  <select className={cellSelect} value={c.typeCommande || typesCommande[0]}
+                    onChange={(e) => update(c.id, { typeCommande: e.target.value })}>
+                    {typesCommande.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </td>
+                <td className="px-1 py-1">
+                  {estTeinture(c) ? (
+                    <select className={cellSelect} value={c.qualiteDonnee || ""}
+                      onChange={(e) => update(c.id, { qualiteDonnee: e.target.value })}>
+                      <option value="">— choisir —</option>
+                      {qualitesDonnees.map((q) => <option key={q} value={q}>{q}</option>)}
+                    </select>
+                  ) : (
+                    <span className="px-2 text-[#9AA0A6]">—</span>
+                  )}
+                </td>
+                <td className="px-1 py-1">
+                  <input type="number" min="0" step="0.5" className={cellText + " bz-mono text-right"} placeholder="0"
+                    value={c.metrage ?? ""}
+                    onChange={(e) => update(c.id, { metrage: e.target.value })} />
+                </td>
+                <td className="px-1 py-1">
+                  <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
+                    value={c.prixMetre ?? ""}
+                    onChange={(e) => update(c.id, { prixMetre: e.target.value })} />
+                </td>
+                <td className="px-3 py-1 bz-mono text-right whitespace-nowrap">{fcfa(totalDe(c))}</td>
+                <td className="px-1 py-1">
+                  <input type="date" className={cellText + " bz-mono"} value={c.dateRetrait || ""}
+                    onChange={(e) => update(c.id, { dateRetrait: e.target.value })} />
+                </td>
+                <td className="px-1 py-1">
+                  <select
+                    className={cellSelect + (c.statut === "retiree" ? " text-[#1F6F5C] font-medium" : " text-[#B9832F] font-medium")}
+                    value={c.statut || "en_attente"}
+                    onChange={(e) => changerStatut(c.id, e.target.value)}>
+                    <option value="en_attente">Non</option>
+                    <option value="retiree">Oui</option>
+                  </select>
+                </td>
+                <td className="px-1 py-1">
+                  {c.statut === "retiree" ? (
+                    <input type="date" className={cellText + " bz-mono"} value={c.dateRetiree || ""}
+                      onChange={(e) => update(c.id, { dateRetiree: e.target.value })} />
+                  ) : (
+                    <span className="px-2 text-[#9AA0A6]">—</span>
+                  )}
+                </td>
+                <td className="px-1 py-1 text-center">
+                  <button onClick={() => remove(c.id)} title="Supprimer la ligne"
+                    className="text-[#C1652F] hover:underline text-sm px-2">✕</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
+        Écrivez directement dans les cases : tout est enregistré automatiquement. Les lignes en jaune clair sont les commandes pas encore retirées.
+        Quand vous passez « Retirée ? » à Oui, le jour du retrait se remplit automatiquement avec la date du jour (modifiable).
+        La colonne « Qualité donnée » ne s'active que pour les commandes de teinture.
+      </p>
     </div>
   );
 }
