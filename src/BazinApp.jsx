@@ -1233,24 +1233,39 @@ function TeinturesView({ teintures, saveTeintures }) {
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState("");
+  const [selection, setSelection] = useState(null); // nom du teinturier ouvert, ou null
 
   const qualites = ["Vainqueur blanc", "Moins riche", "Riche", "Habillement homme", "Habillement femme"];
   const empty = { id: "", date: today(), teinturier: "", qualite: qualites[0], prix: 0, statut: "en_teinture", notes: "" };
 
-  const filtered = useMemo(() => {
+  const nomDe = (t) => (t.teinturier || "").trim() || "Sans nom";
+
+  const teinturiers = useMemo(() => {
+    const map = new Map();
+    teintures.forEach((t) => {
+      const nom = nomDe(t);
+      if (!map.has(nom)) map.set(nom, { nom, nb: 0, enTeinture: 0, total: 0 });
+      const e = map.get(nom);
+      e.nb += 1;
+      e.total += Number(t.prix) || 0;
+      if (t.statut !== "renvoye") e.enTeinture += 1;
+    });
+    return [...map.values()].sort((a, b) => a.nom.localeCompare(b.nom));
+  }, [teintures]);
+
+  const teinturiersAffiches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return teintures;
-    return teintures.filter((t) =>
-      [t.teinturier, t.qualite, t.notes].some((v) => (v || "").toLowerCase().includes(q))
-    );
-  }, [teintures, query]);
+    if (!q) return teinturiers;
+    return teinturiers.filter((t) => t.nom.toLowerCase().includes(q));
+  }, [teinturiers, query]);
 
-  const enAttente = teintures.filter((t) => t.statut !== "renvoye").length;
+  const fiche = selection ? teinturiers.find((t) => t.nom === selection) : null;
+  const entrees = selection ? teintures.filter((t) => nomDe(t) === selection) : [];
 
-  const exportTeintures = () =>
+  const exportTeintures = (rows, nomFichier) =>
     exportCSV(
-      "bazin-teintures.csv",
-      teintures.map((t) => ({ ...t, statut: t.statut === "renvoye" ? "Renvoyé" : "En teinture" })),
+      nomFichier,
+      rows.map((t) => ({ ...t, statut: t.statut === "renvoye" ? "Renvoyé" : "En teinture" })),
       [
         { key: "date", label: "Date" },
         { key: "teinturier", label: "Teinturier" },
@@ -1261,13 +1276,17 @@ function TeinturesView({ teintures, saveTeintures }) {
       ]
     );
 
-  const openNew = () => { setEditing({ ...empty, id: uid() }); setShowForm(true); };
+  const openNew = (nomTeinturier) => {
+    setEditing({ ...empty, id: uid(), teinturier: nomTeinturier || "" });
+    setShowForm(true);
+  };
   const openEdit = (t) => { setEditing(t); setShowForm(true); };
 
   const submit = (e) => {
     e.preventDefault();
     const exists = teintures.some((t) => t.id === editing.id);
     saveTeintures(exists ? teintures.map((t) => (t.id === editing.id ? editing : t)) : [...teintures, editing]);
+    if (selection) setSelection(nomDe(editing));
     setShowForm(false);
     setEditing(null);
   };
@@ -1277,114 +1296,176 @@ function TeinturesView({ teintures, saveTeintures }) {
   const marquerRenvoye = (id) =>
     saveTeintures(teintures.map((t) => (t.id === id ? { ...t, statut: "renvoye" } : t)));
 
+  const formulaire = showForm && (
+    <form onSubmit={submit} className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-6 grid grid-cols-2 gap-4">
+      <Field label="Nom du teinturier">
+        <input required className={inputCls} value={editing.teinturier}
+          onChange={(e) => setEditing({ ...editing, teinturier: e.target.value })} />
+      </Field>
+      <Field label="Qualité de bazin">
+        <select className={inputCls} value={editing.qualite}
+          onChange={(e) => setEditing({ ...editing, qualite: e.target.value })}>
+          {qualites.map((q) => <option key={q} value={q}>{q}</option>)}
+        </select>
+      </Field>
+      <Field label="Prix de la teinture (F CFA)">
+        <input type="number" min="0" step="1" required className={inputCls} value={editing.prix}
+          onChange={(e) => setEditing({ ...editing, prix: e.target.value })} />
+      </Field>
+      <Field label="Date">
+        <input type="date" required className={inputCls} value={editing.date}
+          onChange={(e) => setEditing({ ...editing, date: e.target.value })} />
+      </Field>
+      <Field label="Le bazin a-t-il été renvoyé ?">
+        <select className={inputCls} value={editing.statut}
+          onChange={(e) => setEditing({ ...editing, statut: e.target.value })}>
+          <option value="en_teinture">Non, encore en teinture</option>
+          <option value="renvoye">Oui, renvoyé</option>
+        </select>
+      </Field>
+      <Field label="Notes">
+        <input className={inputCls} value={editing.notes}
+          onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
+      </Field>
+      <div className="col-span-2 flex gap-3 mt-1">
+        <button type="submit" className="bz-sans bg-[#1B2430] text-white px-4 py-2 rounded-sm text-sm">
+          Enregistrer
+        </button>
+        <button type="button" onClick={() => { setShowForm(false); setEditing(null); }}
+          className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2]">
+          Annuler
+        </button>
+      </div>
+    </form>
+  );
+
+  /* ---- Partie d'un teinturier ---- */
+  if (selection) {
+    return (
+      <div>
+        <button onClick={() => { setSelection(null); setShowForm(false); setEditing(null); }}
+          className="bz-sans text-sm text-[#1F6F5C] mb-4 hover:underline">
+          ← Tous les teinturiers
+        </button>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="bz-serif text-3xl font-semibold">{selection}</h1>
+            <p className="bz-sans text-[#5B5F55]">
+              {fiche ? `${fiche.nb} bazin(s) confié(s) · ${fiche.enTeinture} encore en teinture · total teinture : ` : ""}
+              {fiche && <span className="bz-mono">{fcfa(fiche.total)}</span>}
+            </p>
+          </div>
+          <div className="flex gap-2 items-center">
+            <button onClick={() => exportTeintures(entrees, `bazin-teinture-${selection}.csv`)}
+              className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
+              Exporter CSV
+            </button>
+            <button onClick={() => openNew(selection)}
+              className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+              + Bazin confié
+            </button>
+          </div>
+        </div>
+
+        {formulaire}
+
+        <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-hidden">
+          {entrees.length === 0 ? (
+            <p className="bz-sans text-sm text-[#9AA0A6] p-6">Aucun bazin pour ce teinturier.</p>
+          ) : (
+            <table className="w-full text-sm bz-sans">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+                  <th className="px-5 py-3">Date</th>
+                  <th className="px-5 py-3">Qualité</th>
+                  <th className="px-5 py-3">Prix teinture</th>
+                  <th className="px-5 py-3">Statut</th>
+                  <th className="px-5 py-3">Notes</th>
+                  <th className="px-5 py-3"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...entrees].sort((a, b) => (a.date < b.date ? 1 : -1)).map((t) => (
+                  <tr key={t.id} className="bz-row border-b border-[#EFEBDF] last:border-0">
+                    <td className="px-5 py-3 bz-mono">{fmtDate(t.date)}</td>
+                    <td className="px-5 py-3">{t.qualite}</td>
+                    <td className="px-5 py-3 bz-mono">{fcfa(t.prix)}</td>
+                    <td className="px-5 py-3">
+                      <Tampon label={t.statut === "renvoye" ? "Renvoyé" : "En teinture"}
+                        tone={t.statut === "renvoye" ? "ink" : "gold"} />
+                    </td>
+                    <td className="px-5 py-3 text-[#5B5F55]">{t.notes}</td>
+                    <td className="px-5 py-3 text-right whitespace-nowrap">
+                      {t.statut !== "renvoye" && (
+                        <button onClick={() => marquerRenvoye(t.id)} className="text-[#1F6F5C] mr-3 hover:underline">
+                          Marquer renvoyé
+                        </button>
+                      )}
+                      <button onClick={() => openEdit(t)} className="text-[#1F6F5C] mr-3 hover:underline">Modifier</button>
+                      <button onClick={() => remove(t.id)} className="text-[#C1652F] hover:underline">Supprimer</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* ---- Liste des teinturiers ---- */
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="bz-serif text-3xl font-semibold">Teinturiers</h1>
           <p className="bz-sans text-[#5B5F55]">
-            {teintures.length} bazin(s) confié(s) · {enAttente} encore en teinture
+            {teinturiers.length} teinturier(s) · {teintures.filter((t) => t.statut !== "renvoye").length} bazin(s) encore en teinture
           </p>
         </div>
         <div className="flex gap-2 items-center">
           <SearchBox value={query} onChange={setQuery} placeholder="Rechercher un teinturier…" />
-          <button onClick={exportTeintures}
+          <button onClick={() => exportTeintures(teintures, "bazin-teintures.csv")}
             className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
             Exporter CSV
           </button>
-          <button onClick={openNew}
+          <button onClick={() => openNew("")}
             className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
             + Bazin confié
           </button>
         </div>
       </div>
 
-      {showForm && (
-        <form onSubmit={submit} className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-6 grid grid-cols-2 gap-4">
-          <Field label="Nom du teinturier">
-            <input required className={inputCls} value={editing.teinturier}
-              onChange={(e) => setEditing({ ...editing, teinturier: e.target.value })} />
-          </Field>
-          <Field label="Qualité de bazin">
-            <select className={inputCls} value={editing.qualite}
-              onChange={(e) => setEditing({ ...editing, qualite: e.target.value })}>
-              {qualites.map((q) => <option key={q} value={q}>{q}</option>)}
-            </select>
-          </Field>
-          <Field label="Prix de la teinture (F CFA)">
-            <input type="number" min="0" step="1" required className={inputCls} value={editing.prix}
-              onChange={(e) => setEditing({ ...editing, prix: e.target.value })} />
-          </Field>
-          <Field label="Date">
-            <input type="date" required className={inputCls} value={editing.date}
-              onChange={(e) => setEditing({ ...editing, date: e.target.value })} />
-          </Field>
-          <Field label="Le bazin a-t-il été renvoyé ?">
-            <select className={inputCls} value={editing.statut}
-              onChange={(e) => setEditing({ ...editing, statut: e.target.value })}>
-              <option value="en_teinture">Non, encore en teinture</option>
-              <option value="renvoye">Oui, renvoyé</option>
-            </select>
-          </Field>
-          <Field label="Notes">
-            <input className={inputCls} value={editing.notes}
-              onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
-          </Field>
-          <div className="col-span-2 flex gap-3 mt-1">
-            <button type="submit" className="bz-sans bg-[#1B2430] text-white px-4 py-2 rounded-sm text-sm">
-              Enregistrer
-            </button>
-            <button type="button" onClick={() => { setShowForm(false); setEditing(null); }}
-              className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2]">
-              Annuler
-            </button>
-          </div>
-        </form>
-      )}
+      {formulaire}
 
-      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-hidden">
-        {filtered.length === 0 ? (
-          <p className="bz-sans text-sm text-[#9AA0A6] p-6">
-            {teintures.length === 0 ? "Aucun bazin confié à un teinturier pour l'instant." : "Aucun résultat pour cette recherche."}
+      {teinturiersAffiches.length === 0 ? (
+        <div className="bg-white border border-[#D8D2C2] rounded-sm p-6">
+          <p className="bz-sans text-sm text-[#9AA0A6]">
+            {teintures.length === 0
+              ? "Aucun bazin confié pour l'instant. Ajoutez le premier avec le bouton ci-dessus : le teinturier aura automatiquement sa partie."
+              : "Aucun teinturier ne correspond à cette recherche."}
           </p>
-        ) : (
-          <table className="w-full text-sm bz-sans">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
-                <th className="px-5 py-3">Date</th>
-                <th className="px-5 py-3">Teinturier</th>
-                <th className="px-5 py-3">Qualité</th>
-                <th className="px-5 py-3">Prix teinture</th>
-                <th className="px-5 py-3">Statut</th>
-                <th className="px-5 py-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...filtered].sort((a, b) => (a.date < b.date ? 1 : -1)).map((t) => (
-                <tr key={t.id} className="bz-row border-b border-[#EFEBDF] last:border-0">
-                  <td className="px-5 py-3 bz-mono">{fmtDate(t.date)}</td>
-                  <td className="px-5 py-3 font-medium">{t.teinturier}</td>
-                  <td className="px-5 py-3">{t.qualite}</td>
-                  <td className="px-5 py-3 bz-mono">{fcfa(t.prix)}</td>
-                  <td className="px-5 py-3">
-                    <Tampon label={t.statut === "renvoye" ? "Renvoyé" : "En teinture"}
-                      tone={t.statut === "renvoye" ? "ink" : "gold"} />
-                  </td>
-                  <td className="px-5 py-3 text-right whitespace-nowrap">
-                    {t.statut !== "renvoye" && (
-                      <button onClick={() => marquerRenvoye(t.id)} className="text-[#1F6F5C] mr-3 hover:underline">
-                        Marquer renvoyé
-                      </button>
-                    )}
-                    <button onClick={() => openEdit(t)} className="text-[#1F6F5C] mr-3 hover:underline">Modifier</button>
-                    <button onClick={() => remove(t.id)} className="text-[#C1652F] hover:underline">Supprimer</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-4">
+          {teinturiersAffiches.map((t) => (
+            <button key={t.nom} onClick={() => setSelection(t.nom)}
+              className="text-left bg-white border border-[#D8D2C2] rounded-sm p-5 hover:border-[#1F6F5C] transition-colors">
+              <div className="bz-serif text-lg font-semibold mb-1">{t.nom}</div>
+              <div className="bz-sans text-sm text-[#5B5F55]">{t.nb} bazin(s) confié(s)</div>
+              <div className="bz-sans text-sm mb-2">
+                {t.enTeinture > 0 ? (
+                  <span className="text-[#B9832F]">{t.enTeinture} encore en teinture</span>
+                ) : (
+                  <span className="text-[#1F6F5C]">Tout a été renvoyé</span>
+                )}
+              </div>
+              <div className="bz-mono text-sm">{fcfa(t.total)}</div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
