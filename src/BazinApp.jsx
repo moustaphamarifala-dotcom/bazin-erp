@@ -3,8 +3,12 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 
 /* ---------- Utilitaires ---------- */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const euros = (n) =>
-  (Number(n) || 0).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+const fcfa = (n) =>
+  (Number(n) || 0).toLocaleString("fr-FR", {
+    style: "currency",
+    currency: "XOF",
+    maximumFractionDigits: 0,
+  });
 const today = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (iso) => {
   if (!iso) return "";
@@ -143,7 +147,7 @@ export default function BazinApp() {
     if (client?.email) {
       const sujet = encodeURIComponent(`Relance — Facture ${doc.numero}`);
       const corps = encodeURIComponent(
-        `Bonjour${client.contact ? " " + client.contact : ""},\n\nSauf erreur de notre part, la facture ${doc.numero} du ${fmtDate(doc.date)} d'un montant de ${euros(docLignesTotal(doc))} reste impayée à ce jour.\n\nPourriez-vous nous indiquer où en est son règlement ?\n\nMerci d'avance,\nBazin`
+        `Bonjour${client.contact ? " " + client.contact : ""},\n\nSauf erreur de notre part, la facture ${doc.numero} du ${fmtDate(doc.date)} d'un montant de ${fcfa(docLignesTotal(doc))} reste impayée à ce jour.\n\nPourriez-vous nous indiquer où en est son règlement ?\n\nMerci d'avance,\nBazin`
       );
       window.open(`mailto:${client.email}?subject=${sujet}&body=${corps}`, "_blank");
     }
@@ -303,8 +307,8 @@ function PrintView({ doc, clients, onClose }) {
               <tr key={l.id} className="border-b border-[#EFEBDF]">
                 <td className="py-2">{l.description}</td>
                 <td className="py-2 text-right bz-mono">{l.quantite}</td>
-                <td className="py-2 text-right bz-mono">{euros(l.prixUnitaire)}</td>
-                <td className="py-2 text-right bz-mono">{euros(Number(l.quantite) * Number(l.prixUnitaire))}</td>
+                <td className="py-2 text-right bz-mono">{fcfa(l.prixUnitaire)}</td>
+                <td className="py-2 text-right bz-mono">{fcfa(Number(l.quantite) * Number(l.prixUnitaire))}</td>
               </tr>
             ))}
           </tbody>
@@ -313,7 +317,7 @@ function PrintView({ doc, clients, onClose }) {
         <div className="flex justify-end">
           <div className="w-64 flex justify-between border-t-2 border-[#1B2430] pt-2">
             <span className="bz-serif text-lg">Total</span>
-            <span className="bz-mono text-lg font-medium">{euros(total)}</span>
+            <span className="bz-mono text-lg font-medium">{fcfa(total)}</span>
           </div>
         </div>
       </div>
@@ -327,7 +331,7 @@ function Dashboard({ clients, stock, docs, lowStock, totalDu, docLignesTotal, en
     ["Clients", clients.length],
     ["Articles en stock", stock.length],
     ["Devis & factures", docs.length],
-    ["Reste à encaisser", euros(totalDu)],
+    ["Reste à encaisser", fcfa(totalDu)],
   ];
 
   const revenueByMonth = useMemo(() => {
@@ -368,8 +372,8 @@ function Dashboard({ clients, stock, docs, lowStock, totalDu, docLignesTotal, en
               <CartesianGrid strokeDasharray="3 3" stroke="#EFEBDF" />
               <XAxis dataKey="mois" tick={{ fontSize: 12, fontFamily: "Inter" }} stroke="#9AA0A6" />
               <YAxis tick={{ fontSize: 12, fontFamily: "Inter" }} stroke="#9AA0A6" width={70}
-                tickFormatter={(v) => euros(v)} />
-              <Tooltip formatter={(v) => euros(v)} contentStyle={{ fontFamily: "Inter", fontSize: 13 }} />
+                tickFormatter={(v) => fcfa(v)} />
+              <Tooltip formatter={(v) => fcfa(v)} contentStyle={{ fontFamily: "Inter", fontSize: 13 }} />
               <Bar dataKey="total" fill="#1F6F5C" radius={[2, 2, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -392,7 +396,7 @@ function Dashboard({ clients, stock, docs, lowStock, totalDu, docLignesTotal, en
                   )}
                 </span>
                 <span className="flex items-center gap-3">
-                  <span className="bz-mono">{euros(docLignesTotal(d))}</span>
+                  <span className="bz-mono">{fcfa(docLignesTotal(d))}</span>
                   <button onClick={() => relancer(d)} className="text-[#1F6F5C] hover:underline whitespace-nowrap">
                     Relancer
                   </button>
@@ -438,7 +442,7 @@ function Dashboard({ clients, stock, docs, lowStock, totalDu, docLignesTotal, en
                     <span>
                       {d.numero} — {clients.find((c) => c.id === d.clientId)?.nom || "Client supprimé"}
                     </span>
-                    <span className="bz-mono">{euros(docLignesTotal(d))}</span>
+                    <span className="bz-mono">{fcfa(docLignesTotal(d))}</span>
                   </li>
                 ))}
             </ul>
@@ -789,8 +793,8 @@ function StockView({ stock, saveStock, fournisseurs }) {
             <input required className={inputCls} value={editing.nom}
               onChange={(e) => setEditing({ ...editing, nom: e.target.value })} />
           </Field>
-          <Field label="Prix unitaire (€)">
-            <input type="number" step="0.01" min="0" className={inputCls} value={editing.prixUnitaire}
+          <Field label="Prix unitaire (F CFA)">
+            <input type="number" step="1" min="0" className={inputCls} value={editing.prixUnitaire}
               onChange={(e) => setEditing({ ...editing, prixUnitaire: e.target.value })} />
           </Field>
           <Field label="Quantité en stock">
@@ -843,7 +847,7 @@ function StockView({ stock, saveStock, fournisseurs }) {
                 return (
                   <tr key={s.id} className="bz-row border-b border-[#EFEBDF] last:border-0">
                     <td className="px-5 py-3 font-medium">{s.nom}</td>
-                    <td className="px-5 py-3 bz-mono">{euros(s.prixUnitaire)}</td>
+                    <td className="px-5 py-3 bz-mono">{fcfa(s.prixUnitaire)}</td>
                     <td className="px-5 py-3 bz-mono">
                       {s.quantite}
                       {low && <Tampon label="Bas" tone="gold" />}
@@ -996,7 +1000,7 @@ function DocsView({ docs, saveDocs, clients, stock, docLignesTotal, onPrint, rel
                       onChange={(e) => updateLigne(idx, { quantite: e.target.value })} />
                   </div>
                   <div className="col-span-1">
-                    <input type="number" min="0" step="0.01" placeholder="P.U." className={inputCls + " w-full"} value={l.prixUnitaire}
+                    <input type="number" min="0" step="1" placeholder="P.U." className={inputCls + " w-full"} value={l.prixUnitaire}
                       onChange={(e) => updateLigne(idx, { prixUnitaire: e.target.value })} />
                   </div>
                   <div className="col-span-1 text-right">
@@ -1012,7 +1016,7 @@ function DocsView({ docs, saveDocs, clients, stock, docLignesTotal, onPrint, rel
 
           <div className="flex justify-between items-center mt-6 pt-4 border-t border-[#EFEBDF]">
             <div className="bz-serif text-xl">
-              Total : <span className="bz-mono">{euros(docLignesTotal(editing))}</span>
+              Total : <span className="bz-mono">{fcfa(docLignesTotal(editing))}</span>
             </div>
             <div className="flex gap-3">
               <button type="submit" className="bz-sans bg-[#1B2430] text-white px-4 py-2 rounded-sm text-sm">
@@ -1054,7 +1058,7 @@ function DocsView({ docs, saveDocs, clients, stock, docLignesTotal, onPrint, rel
                   <td className="px-5 py-3">{clients.find((c) => c.id === d.clientId)?.nom || "—"}</td>
                   <td className="px-5 py-3 bz-mono">{fmtDate(d.date)}</td>
                   <td className={`px-5 py-3 bz-mono ${enRetard ? "text-[#C1652F] font-medium" : ""}`}>{fmtDate(d.echeance)}</td>
-                  <td className="px-5 py-3 bz-mono">{euros(docLignesTotal(d))}</td>
+                  <td className="px-5 py-3 bz-mono">{fcfa(docLignesTotal(d))}</td>
                   <td className="px-5 py-3"><Tampon label={statutLabel[d.statut]} tone={statutTone[d.statut]} /></td>
                   <td className="px-5 py-3 text-right whitespace-nowrap">
                     {enRetard && (
