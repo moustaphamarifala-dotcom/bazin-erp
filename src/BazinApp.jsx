@@ -83,6 +83,7 @@ export default function BazinApp() {
   const [stock, setStock] = useState([]);
   const [docs, setDocs] = useState([]);
   const [depenses, setDepenses] = useState([]);
+  const [teintures, setTeintures] = useState([]);
 
   /* ---- chargement initial ---- */
   useEffect(() => {
@@ -95,18 +96,20 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d, dep] = await Promise.all([
+      const [c, f, s, d, dep, t] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
         load("bazin:documents", []),
         load("bazin:depenses", []),
+        load("bazin:teintures", []),
       ]);
       setClients(c);
       setFournisseurs(f);
       setStock(s);
       setDocs(d);
       setDepenses(dep);
+      setTeintures(t);
       setLoading(false);
     })();
   }, []);
@@ -126,6 +129,7 @@ export default function BazinApp() {
   const saveStock = (next) => { setStock(next); persist("bazin:stock", next); };
   const saveDocs = (next) => { setDocs(next); persist("bazin:documents", next); };
   const saveDepenses = (next) => { setDepenses(next); persist("bazin:depenses", next); };
+  const saveTeintures = (next) => { setTeintures(next); persist("bazin:teintures", next); };
 
   /* ---- dérivés ---- */
   const lowStock = stock.filter((s) => Number(s.quantite) <= Number(s.seuilAlerte));
@@ -200,6 +204,7 @@ export default function BazinApp() {
             ["stock", "Stock"],
             ["docs", "Factures & devis"],
             ["depenses", "Dépenses"],
+            ["teintures", "Teinturiers"],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -259,6 +264,9 @@ export default function BazinApp() {
         )}
         {tab === "depenses" && (
           <DepensesView depenses={depenses} saveDepenses={saveDepenses} />
+        )}
+        {tab === "teintures" && (
+          <TeinturesView teintures={teintures} saveTeintures={saveTeintures} />
         )}
       </main>
     </div>
@@ -1209,6 +1217,167 @@ function DepensesView({ depenses, saveDepenses }) {
                   <td className="px-5 py-3 text-right whitespace-nowrap">
                     <button onClick={() => openEdit(d)} className="text-[#1F6F5C] mr-3 hover:underline">Modifier</button>
                     <button onClick={() => remove(d.id)} className="text-[#C1652F] hover:underline">Supprimer</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================ */
+function TeinturesView({ teintures, saveTeintures }) {
+  const [editing, setEditing] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const qualites = ["Vainqueur blanc", "Moins riche", "Riche", "Habillement homme", "Habillement femme"];
+  const empty = { id: "", date: today(), teinturier: "", qualite: qualites[0], prix: 0, statut: "en_teinture", notes: "" };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return teintures;
+    return teintures.filter((t) =>
+      [t.teinturier, t.qualite, t.notes].some((v) => (v || "").toLowerCase().includes(q))
+    );
+  }, [teintures, query]);
+
+  const enAttente = teintures.filter((t) => t.statut !== "renvoye").length;
+
+  const exportTeintures = () =>
+    exportCSV(
+      "bazin-teintures.csv",
+      teintures.map((t) => ({ ...t, statut: t.statut === "renvoye" ? "Renvoyé" : "En teinture" })),
+      [
+        { key: "date", label: "Date" },
+        { key: "teinturier", label: "Teinturier" },
+        { key: "qualite", label: "Qualité de bazin" },
+        { key: "prix", label: "Prix teinture (F CFA)" },
+        { key: "statut", label: "Statut" },
+        { key: "notes", label: "Notes" },
+      ]
+    );
+
+  const openNew = () => { setEditing({ ...empty, id: uid() }); setShowForm(true); };
+  const openEdit = (t) => { setEditing(t); setShowForm(true); };
+
+  const submit = (e) => {
+    e.preventDefault();
+    const exists = teintures.some((t) => t.id === editing.id);
+    saveTeintures(exists ? teintures.map((t) => (t.id === editing.id ? editing : t)) : [...teintures, editing]);
+    setShowForm(false);
+    setEditing(null);
+  };
+
+  const remove = (id) => saveTeintures(teintures.filter((t) => t.id !== id));
+
+  const marquerRenvoye = (id) =>
+    saveTeintures(teintures.map((t) => (t.id === id ? { ...t, statut: "renvoye" } : t)));
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="bz-serif text-3xl font-semibold">Teinturiers</h1>
+          <p className="bz-sans text-[#5B5F55]">
+            {teintures.length} bazin(s) confié(s) · {enAttente} encore en teinture
+          </p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <SearchBox value={query} onChange={setQuery} placeholder="Rechercher un teinturier…" />
+          <button onClick={exportTeintures}
+            className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
+            Exporter CSV
+          </button>
+          <button onClick={openNew}
+            className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+            + Bazin confié
+          </button>
+        </div>
+      </div>
+
+      {showForm && (
+        <form onSubmit={submit} className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-6 grid grid-cols-2 gap-4">
+          <Field label="Nom du teinturier">
+            <input required className={inputCls} value={editing.teinturier}
+              onChange={(e) => setEditing({ ...editing, teinturier: e.target.value })} />
+          </Field>
+          <Field label="Qualité de bazin">
+            <select className={inputCls} value={editing.qualite}
+              onChange={(e) => setEditing({ ...editing, qualite: e.target.value })}>
+              {qualites.map((q) => <option key={q} value={q}>{q}</option>)}
+            </select>
+          </Field>
+          <Field label="Prix de la teinture (F CFA)">
+            <input type="number" min="0" step="1" required className={inputCls} value={editing.prix}
+              onChange={(e) => setEditing({ ...editing, prix: e.target.value })} />
+          </Field>
+          <Field label="Date">
+            <input type="date" required className={inputCls} value={editing.date}
+              onChange={(e) => setEditing({ ...editing, date: e.target.value })} />
+          </Field>
+          <Field label="Le bazin a-t-il été renvoyé ?">
+            <select className={inputCls} value={editing.statut}
+              onChange={(e) => setEditing({ ...editing, statut: e.target.value })}>
+              <option value="en_teinture">Non, encore en teinture</option>
+              <option value="renvoye">Oui, renvoyé</option>
+            </select>
+          </Field>
+          <Field label="Notes">
+            <input className={inputCls} value={editing.notes}
+              onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
+          </Field>
+          <div className="col-span-2 flex gap-3 mt-1">
+            <button type="submit" className="bz-sans bg-[#1B2430] text-white px-4 py-2 rounded-sm text-sm">
+              Enregistrer
+            </button>
+            <button type="button" onClick={() => { setShowForm(false); setEditing(null); }}
+              className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2]">
+              Annuler
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-hidden">
+        {filtered.length === 0 ? (
+          <p className="bz-sans text-sm text-[#9AA0A6] p-6">
+            {teintures.length === 0 ? "Aucun bazin confié à un teinturier pour l'instant." : "Aucun résultat pour cette recherche."}
+          </p>
+        ) : (
+          <table className="w-full text-sm bz-sans">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+                <th className="px-5 py-3">Date</th>
+                <th className="px-5 py-3">Teinturier</th>
+                <th className="px-5 py-3">Qualité</th>
+                <th className="px-5 py-3">Prix teinture</th>
+                <th className="px-5 py-3">Statut</th>
+                <th className="px-5 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...filtered].sort((a, b) => (a.date < b.date ? 1 : -1)).map((t) => (
+                <tr key={t.id} className="bz-row border-b border-[#EFEBDF] last:border-0">
+                  <td className="px-5 py-3 bz-mono">{fmtDate(t.date)}</td>
+                  <td className="px-5 py-3 font-medium">{t.teinturier}</td>
+                  <td className="px-5 py-3">{t.qualite}</td>
+                  <td className="px-5 py-3 bz-mono">{fcfa(t.prix)}</td>
+                  <td className="px-5 py-3">
+                    <Tampon label={t.statut === "renvoye" ? "Renvoyé" : "En teinture"}
+                      tone={t.statut === "renvoye" ? "ink" : "gold"} />
+                  </td>
+                  <td className="px-5 py-3 text-right whitespace-nowrap">
+                    {t.statut !== "renvoye" && (
+                      <button onClick={() => marquerRenvoye(t.id)} className="text-[#1F6F5C] mr-3 hover:underline">
+                        Marquer renvoyé
+                      </button>
+                    )}
+                    <button onClick={() => openEdit(t)} className="text-[#1F6F5C] mr-3 hover:underline">Modifier</button>
+                    <button onClick={() => remove(t.id)} className="text-[#C1652F] hover:underline">Supprimer</button>
                   </td>
                 </tr>
               ))}
