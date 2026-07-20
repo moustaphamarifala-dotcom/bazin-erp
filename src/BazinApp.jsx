@@ -1236,7 +1236,7 @@ function TeinturesView({ teintures, saveTeintures }) {
   const [selection, setSelection] = useState(null); // nom du teinturier ouvert, ou null
 
   const qualites = ["Vainqueur blanc", "Moins riche", "Riche", "Habillement homme", "Habillement femme"];
-  const empty = { id: "", date: today(), teinturier: "", qualite: qualites[0], prix: 0, statut: "en_teinture", notes: "" };
+  const empty = { id: "", date: today(), teinturier: "", lancePar: "", qualite: qualites[0], prix: 0, statut: "en_teinture", notes: "" };
 
   const nomDe = (t) => (t.teinturier || "").trim() || "Sans nom";
 
@@ -1269,6 +1269,7 @@ function TeinturesView({ teintures, saveTeintures }) {
       [
         { key: "date", label: "Date" },
         { key: "teinturier", label: "Teinturier" },
+        { key: "lancePar", label: "Commande lancée par" },
         { key: "qualite", label: "Qualité de bazin" },
         { key: "prix", label: "Prix teinture (F CFA)" },
         { key: "statut", label: "Statut" },
@@ -1301,6 +1302,10 @@ function TeinturesView({ teintures, saveTeintures }) {
       <Field label="Nom du teinturier">
         <input required className={inputCls} value={editing.teinturier}
           onChange={(e) => setEditing({ ...editing, teinturier: e.target.value })} />
+      </Field>
+      <Field label="Personne qui a lancé la commande">
+        <input required className={inputCls} value={editing.lancePar || ""}
+          onChange={(e) => setEditing({ ...editing, lancePar: e.target.value })} />
       </Field>
       <Field label="Qualité de bazin">
         <select className={inputCls} value={editing.qualite}
@@ -1377,6 +1382,7 @@ function TeinturesView({ teintures, saveTeintures }) {
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
                   <th className="px-5 py-3">Date</th>
+                  <th className="px-5 py-3">Lancée par</th>
                   <th className="px-5 py-3">Qualité</th>
                   <th className="px-5 py-3">Prix teinture</th>
                   <th className="px-5 py-3">Statut</th>
@@ -1388,6 +1394,7 @@ function TeinturesView({ teintures, saveTeintures }) {
                 {[...entrees].sort((a, b) => (a.date < b.date ? 1 : -1)).map((t) => (
                   <tr key={t.id} className="bz-row border-b border-[#EFEBDF] last:border-0">
                     <td className="px-5 py-3 bz-mono">{fmtDate(t.date)}</td>
+                    <td className="px-5 py-3 font-medium">{t.lancePar || "—"}</td>
                     <td className="px-5 py-3">{t.qualite}</td>
                     <td className="px-5 py-3 bz-mono">{fcfa(t.prix)}</td>
                     <td className="px-5 py-3">
