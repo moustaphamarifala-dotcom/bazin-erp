@@ -1270,7 +1270,7 @@ function TeinturesView({ teintures, saveTeintures }) {
   const addRow = (nomTeinturier) =>
     saveTeintures([
       ...teintures,
-      { id: uid(), date: today(), teinturier: nomTeinturier, lancePar: "", qualite: qualites[0], prix: "", statut: "en_teinture", notes: "" },
+      { id: uid(), date: today(), teinturier: nomTeinturier, lancePar: "", qualite: qualites[0], quantite: "", prix: "", statut: "en_teinture", notes: "" },
     ]);
 
   const remove = (id) => saveTeintures(teintures.filter((t) => t.id !== id));
@@ -1294,6 +1294,7 @@ function TeinturesView({ teintures, saveTeintures }) {
         { key: "teinturier", label: "Teinturier" },
         { key: "lancePar", label: "Commande lancée par" },
         { key: "qualite", label: "Qualité de bazin" },
+        { key: "quantite", label: "Quantité" },
         { key: "prix", label: "Prix teinture (F CFA)" },
         { key: "statut", label: "Bazin renvoyé" },
         { key: "notes", label: "Notes" },
@@ -1302,6 +1303,12 @@ function TeinturesView({ teintures, saveTeintures }) {
 
   /* ---- Partie d'un teinturier : tableau modèle Excel ---- */
   if (selection) {
+    const parQualite = qualites
+      .map((q) => ({
+        qualite: q,
+        total: lignes.filter((t) => t.qualite === q).reduce((s, t) => s + (Number(t.quantite) || 0), 0),
+      }))
+      .filter((e) => e.total > 0);
     return (
       <div>
         <button onClick={() => setSelection(null)}
@@ -1328,6 +1335,20 @@ function TeinturesView({ teintures, saveTeintures }) {
           </div>
         </div>
 
+        {parQualite.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-4">
+            {parQualite.map((e) => (
+              <span key={e.qualite}
+                className="bz-sans text-sm bg-white border border-[#D8D2C2] rounded-sm px-3 py-1.5">
+                {e.qualite} : <span className="bz-mono font-medium">{e.total}</span>
+              </span>
+            ))}
+            <span className="bz-sans text-sm bg-[#1B2430] text-white rounded-sm px-3 py-1.5">
+              Total : <span className="bz-mono font-medium">{parQualite.reduce((s, e) => s + e.total, 0)}</span> bazin(s)
+            </span>
+          </div>
+        )}
+
         <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
           <table className="w-full text-sm bz-sans" style={{ minWidth: "860px" }}>
             <thead>
@@ -1335,6 +1356,7 @@ function TeinturesView({ teintures, saveTeintures }) {
                 <th className="px-3 py-3 w-36">Date</th>
                 <th className="px-3 py-3">Lancée par</th>
                 <th className="px-3 py-3 w-44">Qualité de bazin</th>
+                <th className="px-3 py-3 w-20">Qté</th>
                 <th className="px-3 py-3 w-32">Prix (F CFA)</th>
                 <th className="px-3 py-3 w-32">Renvoyé ?</th>
                 <th className="px-3 py-3">Notes</th>
@@ -1344,7 +1366,7 @@ function TeinturesView({ teintures, saveTeintures }) {
             <tbody>
               {lignes.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="px-5 py-6 text-[#9AA0A6]">
+                  <td colSpan="8" className="px-5 py-6 text-[#9AA0A6]">
                     Aucune ligne. Cliquez sur « + Ajouter une ligne » et remplissez les cases directement, comme dans Excel.
                   </td>
                 </tr>
@@ -1365,6 +1387,11 @@ function TeinturesView({ teintures, saveTeintures }) {
                       onChange={(e) => update(t.id, { qualite: e.target.value })}>
                       {qualites.map((q) => <option key={q} value={q}>{q}</option>)}
                     </select>
+                  </td>
+                  <td className="px-1 py-1">
+                    <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
+                      value={t.quantite ?? ""}
+                      onChange={(e) => update(t.id, { quantite: e.target.value })} />
                   </td>
                   <td className="px-1 py-1">
                     <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
