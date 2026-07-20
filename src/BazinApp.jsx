@@ -82,6 +82,7 @@ export default function BazinApp() {
   const [fournisseurs, setFournisseurs] = useState([]);
   const [stock, setStock] = useState([]);
   const [docs, setDocs] = useState([]);
+  const [depenses, setDepenses] = useState([]);
 
   /* ---- chargement initial ---- */
   useEffect(() => {
@@ -94,16 +95,18 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d] = await Promise.all([
+      const [c, f, s, d, dep] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
         load("bazin:documents", []),
+        load("bazin:depenses", []),
       ]);
       setClients(c);
       setFournisseurs(f);
       setStock(s);
       setDocs(d);
+      setDepenses(dep);
       setLoading(false);
     })();
   }, []);
@@ -122,6 +125,7 @@ export default function BazinApp() {
   const saveFournisseurs = (next) => { setFournisseurs(next); persist("bazin:fournisseurs", next); };
   const saveStock = (next) => { setStock(next); persist("bazin:stock", next); };
   const saveDocs = (next) => { setDocs(next); persist("bazin:documents", next); };
+  const saveDepenses = (next) => { setDepenses(next); persist("bazin:depenses", next); };
 
   /* ---- dérivés ---- */
   const lowStock = stock.filter((s) => Number(s.quantite) <= Number(s.seuilAlerte));
@@ -195,6 +199,7 @@ export default function BazinApp() {
             ["fournisseurs", "Fournisseurs"],
             ["stock", "Stock"],
             ["docs", "Factures & devis"],
+            ["depenses", "Dépenses"],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -251,6 +256,9 @@ export default function BazinApp() {
             onPrint={setPrintingDoc}
             relancer={relancer}
           />
+        )}
+        {tab === "depenses" && (
+          <DepensesView depenses={depenses} saveDepenses={saveDepenses} />
         )}
       </main>
     </div>
@@ -1070,6 +1078,140 @@ function DocsView({ docs, saveDocs, clients, stock, docLignesTotal, onPrint, rel
                   </td>
                 </tr>
               );})}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================ */
+function DepensesView({ depenses, saveDepenses }) {
+  const [editing, setEditing] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [query, setQuery] = useState("");
+  const empty = { id: "", personne: "", libelle: "", montant: 0, date: today(), notes: "" };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return depenses;
+    return depenses.filter((d) =>
+      [d.personne, d.libelle, d.notes].some((v) => (v || "").toLowerCase().includes(q))
+    );
+  }, [depenses, query]);
+
+  const totalFiltre = filtered.reduce((s, d) => s + Number(d.montant), 0);
+
+  const exportDepenses = () =>
+    exportCSV("bazin-depenses.csv", depenses, [
+      { key: "date", label: "Date" },
+      { key: "personne", label: "Personne" },
+      { key: "libelle", label: "Dépense" },
+      { key: "montant", label: "Montant (F CFA)" },
+      { key: "notes", label: "Notes" },
+    ]);
+
+  const openNew = () => { setEditing({ ...empty, id: uid() }); setShowForm(true); };
+  const openEdit = (d) => { setEditing(d); setShowForm(true); };
+
+  const submit = (e) => {
+    e.preventDefault();
+    const exists = depenses.some((d) => d.id === editing.id);
+    saveDepenses(exists ? depenses.map((d) => (d.id === editing.id ? editing : d)) : [...depenses, editing]);
+    setShowForm(false);
+    setEditing(null);
+  };
+
+  const remove = (id) => saveDepenses(depenses.filter((d) => d.id !== id));
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="bz-serif text-3xl font-semibold">Dépenses</h1>
+          <p className="bz-sans text-[#5B5F55]">
+            {depenses.length} dépense(s) · total affiché : <span className="bz-mono">{fcfa(totalFiltre)}</span>
+          </p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <SearchBox value={query} onChange={setQuery} placeholder="Rechercher une dépense…" />
+          <button onClick={exportDepenses}
+            className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
+            Exporter CSV
+          </button>
+          <button onClick={openNew}
+            className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+            + Nouvelle dépense
+          </button>
+        </div>
+      </div>
+
+      {showForm && (
+        <form onSubmit={submit} className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-6 grid grid-cols-2 gap-4">
+          <Field label="Nom de la personne">
+            <input required className={inputCls} value={editing.personne}
+              onChange={(e) => setEditing({ ...editing, personne: e.target.value })} />
+          </Field>
+          <Field label="Dépense (quoi ?)">
+            <input required className={inputCls} value={editing.libelle}
+              onChange={(e) => setEditing({ ...editing, libelle: e.target.value })} />
+          </Field>
+          <Field label="Montant (F CFA)">
+            <input type="number" min="0" step="1" required className={inputCls} value={editing.montant}
+              onChange={(e) => setEditing({ ...editing, montant: e.target.value })} />
+          </Field>
+          <Field label="Date">
+            <input type="date" required className={inputCls} value={editing.date}
+              onChange={(e) => setEditing({ ...editing, date: e.target.value })} />
+          </Field>
+          <Field label="Notes">
+            <input className={inputCls} value={editing.notes}
+              onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
+          </Field>
+          <div className="col-span-2 flex gap-3 mt-1">
+            <button type="submit" className="bz-sans bg-[#1B2430] text-white px-4 py-2 rounded-sm text-sm">
+              Enregistrer
+            </button>
+            <button type="button" onClick={() => { setShowForm(false); setEditing(null); }}
+              className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2]">
+              Annuler
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-hidden">
+        {filtered.length === 0 ? (
+          <p className="bz-sans text-sm text-[#9AA0A6] p-6">
+            {depenses.length === 0 ? "Aucune dépense. Ajoutez la première avec le bouton ci-dessus." : "Aucun résultat pour cette recherche."}
+          </p>
+        ) : (
+          <table className="w-full text-sm bz-sans">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+                <th className="px-5 py-3">Date</th>
+                <th className="px-5 py-3">Personne</th>
+                <th className="px-5 py-3">Dépense</th>
+                <th className="px-5 py-3">Montant</th>
+                <th className="px-5 py-3">Notes</th>
+                <th className="px-5 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...filtered].sort((a, b) => (a.date < b.date ? 1 : -1)).map((d) => (
+                <tr key={d.id} className="bz-row border-b border-[#EFEBDF] last:border-0">
+                  <td className="px-5 py-3 bz-mono">{fmtDate(d.date)}</td>
+                  <td className="px-5 py-3 font-medium">{d.personne}</td>
+                  <td className="px-5 py-3">{d.libelle}</td>
+                  <td className="px-5 py-3 bz-mono">{fcfa(d.montant)}</td>
+                  <td className="px-5 py-3 text-[#5B5F55]">{d.notes}</td>
+                  <td className="px-5 py-3 text-right whitespace-nowrap">
+                    <button onClick={() => openEdit(d)} className="text-[#1F6F5C] mr-3 hover:underline">Modifier</button>
+                    <button onClick={() => remove(d.id)} className="text-[#C1652F] hover:underline">Supprimer</button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
