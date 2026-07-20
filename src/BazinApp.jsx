@@ -1231,38 +1231,64 @@ function DepensesView({ depenses, saveDepenses }) {
 /* ============================================================ */
 function TeinturesView({ teintures, saveTeintures }) {
   const [query, setQuery] = useState("");
+  const [selection, setSelection] = useState(null); // nom du teinturier ouvert
+  const [showNew, setShowNew] = useState(false);
+  const [newName, setNewName] = useState("");
 
   const qualites = ["Vainqueur blanc", "Moins riche", "Riche", "Habillement homme", "Habillement femme"];
 
   const cellText = "w-full bg-transparent px-2 py-1.5 text-sm text-[#1B2430] border border-transparent rounded-sm focus:outline-none focus:border-[#1F6F5C] focus:bg-white";
   const cellSelect = cellText + " cursor-pointer";
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return teintures;
-    return teintures.filter((t) =>
-      [t.teinturier, t.lancePar, t.qualite, t.notes].some((v) => (v || "").toLowerCase().includes(q))
-    );
-  }, [teintures, query]);
+  const nomDe = (t) => (t.teinturier || "").trim() || "Sans nom";
 
-  const enAttente = teintures.filter((t) => t.statut !== "renvoye").length;
-  const totalPrix = filtered.reduce((s, t) => s + (Number(t.prix) || 0), 0);
+  const teinturiers = useMemo(() => {
+    const map = new Map();
+    teintures.forEach((t) => {
+      const nom = nomDe(t);
+      if (!map.has(nom)) map.set(nom, { nom, nb: 0, enTeinture: 0, total: 0 });
+      const e = map.get(nom);
+      e.nb += 1;
+      e.total += Number(t.prix) || 0;
+      if (t.statut !== "renvoye") e.enTeinture += 1;
+    });
+    return [...map.values()].sort((a, b) => a.nom.localeCompare(b.nom));
+  }, [teintures]);
+
+  const teinturiersAffiches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return teinturiers;
+    return teinturiers.filter((t) => t.nom.toLowerCase().includes(q));
+  }, [teinturiers, query]);
+
+  const fiche = selection ? teinturiers.find((t) => t.nom === selection) : null;
+  const lignes = selection ? teintures.filter((t) => nomDe(t) === selection) : [];
 
   const update = (id, patch) =>
     saveTeintures(teintures.map((t) => (t.id === id ? { ...t, ...patch } : t)));
 
-  const addRow = () =>
+  const addRow = (nomTeinturier) =>
     saveTeintures([
       ...teintures,
-      { id: uid(), date: today(), teinturier: "", lancePar: "", qualite: qualites[0], prix: "", statut: "en_teinture", notes: "" },
+      { id: uid(), date: today(), teinturier: nomTeinturier, lancePar: "", qualite: qualites[0], prix: "", statut: "en_teinture", notes: "" },
     ]);
 
   const remove = (id) => saveTeintures(teintures.filter((t) => t.id !== id));
 
-  const exportTeintures = () =>
+  const creerTeinturier = (e) => {
+    e.preventDefault();
+    const nom = newName.trim();
+    if (!nom) return;
+    addRow(nom);
+    setSelection(nom);
+    setShowNew(false);
+    setNewName("");
+  };
+
+  const exportTeintures = (rows, nomFichier) =>
     exportCSV(
-      "bazin-teintures.csv",
-      teintures.map((t) => ({ ...t, statut: t.statut === "renvoye" ? "Oui" : "Non" })),
+      nomFichier,
+      rows.map((t) => ({ ...t, statut: t.statut === "renvoye" ? "Oui" : "Non" })),
       [
         { key: "date", label: "Date" },
         { key: "teinturier", label: "Teinturier" },
@@ -1274,103 +1300,172 @@ function TeinturesView({ teintures, saveTeintures }) {
       ]
     );
 
+  /* ---- Partie d'un teinturier : tableau modèle Excel ---- */
+  if (selection) {
+    return (
+      <div>
+        <button onClick={() => setSelection(null)}
+          className="bz-sans text-sm text-[#1F6F5C] mb-4 hover:underline">
+          ← Tous les teinturiers
+        </button>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="bz-serif text-3xl font-semibold">{selection}</h1>
+            <p className="bz-sans text-[#5B5F55]">
+              {fiche ? `${fiche.nb} ligne(s) · ${fiche.enTeinture} bazin(s) encore en teinture · total : ` : ""}
+              {fiche && <span className="bz-mono">{fcfa(fiche.total)}</span>}
+            </p>
+          </div>
+          <div className="flex gap-2 items-center">
+            <button onClick={() => exportTeintures(lignes, `bazin-teinture-${selection}.csv`)}
+              className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
+              Exporter CSV
+            </button>
+            <button onClick={() => addRow(selection)}
+              className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+              + Ajouter une ligne
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
+          <table className="w-full text-sm bz-sans" style={{ minWidth: "860px" }}>
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+                <th className="px-3 py-3 w-36">Date</th>
+                <th className="px-3 py-3">Lancée par</th>
+                <th className="px-3 py-3 w-44">Qualité de bazin</th>
+                <th className="px-3 py-3 w-32">Prix (F CFA)</th>
+                <th className="px-3 py-3 w-32">Renvoyé ?</th>
+                <th className="px-3 py-3">Notes</th>
+                <th className="px-3 py-3 w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {lignes.length === 0 && (
+                <tr>
+                  <td colSpan="7" className="px-5 py-6 text-[#9AA0A6]">
+                    Aucune ligne. Cliquez sur « + Ajouter une ligne » et remplissez les cases directement, comme dans Excel.
+                  </td>
+                </tr>
+              )}
+              {lignes.map((t) => (
+                <tr key={t.id}
+                  className={`border-b border-[#EFEBDF] last:border-0 ${t.statut === "renvoye" ? "" : "bg-[#FDF8EF]"}`}>
+                  <td className="px-1 py-1">
+                    <input type="date" className={cellText + " bz-mono"} value={t.date || ""}
+                      onChange={(e) => update(t.id, { date: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <input className={cellText} placeholder="Qui a lancé la commande" value={t.lancePar || ""}
+                      onChange={(e) => update(t.id, { lancePar: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <select className={cellSelect} value={t.qualite || qualites[0]}
+                      onChange={(e) => update(t.id, { qualite: e.target.value })}>
+                      {qualites.map((q) => <option key={q} value={q}>{q}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-1 py-1">
+                    <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
+                      value={t.prix ?? ""}
+                      onChange={(e) => update(t.id, { prix: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <select
+                      className={cellSelect + (t.statut === "renvoye" ? " text-[#1F6F5C] font-medium" : " text-[#B9832F] font-medium")}
+                      value={t.statut || "en_teinture"}
+                      onChange={(e) => update(t.id, { statut: e.target.value })}>
+                      <option value="en_teinture">Non</option>
+                      <option value="renvoye">Oui</option>
+                    </select>
+                  </td>
+                  <td className="px-1 py-1">
+                    <input className={cellText} value={t.notes || ""}
+                      onChange={(e) => update(t.id, { notes: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1 text-center">
+                    <button onClick={() => remove(t.id)} title="Supprimer la ligne"
+                      className="text-[#C1652F] hover:underline text-sm px-2">✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
+          Écrivez directement dans les cases : tout est enregistré automatiquement. Les lignes en jaune clair sont les bazins encore en teinture.
+        </p>
+      </div>
+    );
+  }
+
+  /* ---- Liste des teinturiers ---- */
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="bz-serif text-3xl font-semibold">Teinturiers</h1>
           <p className="bz-sans text-[#5B5F55]">
-            {teintures.length} ligne(s) · {enAttente} bazin(s) encore en teinture · total : <span className="bz-mono">{fcfa(totalPrix)}</span>
+            {teinturiers.length} teinturier(s) · {teintures.filter((t) => t.statut !== "renvoye").length} bazin(s) encore en teinture
           </p>
         </div>
         <div className="flex gap-2 items-center">
-          <SearchBox value={query} onChange={setQuery} placeholder="Rechercher…" />
-          <button onClick={exportTeintures}
+          <SearchBox value={query} onChange={setQuery} placeholder="Rechercher un teinturier…" />
+          <button onClick={() => exportTeintures(teintures, "bazin-teintures.csv")}
             className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
             Exporter CSV
           </button>
-          <button onClick={addRow}
+          <button onClick={() => { setShowNew(true); setNewName(""); }}
             className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
-            + Ajouter une ligne
+            + Nouveau teinturier
           </button>
         </div>
       </div>
 
-      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
-        <table className="w-full text-sm bz-sans" style={{ minWidth: "980px" }}>
-          <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
-              <th className="px-3 py-3 w-36">Date</th>
-              <th className="px-3 py-3">Teinturier</th>
-              <th className="px-3 py-3">Lancée par</th>
-              <th className="px-3 py-3 w-44">Qualité de bazin</th>
-              <th className="px-3 py-3 w-32">Prix (F CFA)</th>
-              <th className="px-3 py-3 w-32">Renvoyé ?</th>
-              <th className="px-3 py-3">Notes</th>
-              <th className="px-3 py-3 w-10"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan="8" className="px-5 py-6 text-[#9AA0A6]">
-                  {teintures.length === 0
-                    ? "Tableau vide. Cliquez sur « + Ajouter une ligne » et remplissez les cases directement, comme dans Excel."
-                    : "Aucun résultat pour cette recherche."}
-                </td>
-              </tr>
-            )}
-            {filtered.map((t) => (
-              <tr key={t.id}
-                className={`border-b border-[#EFEBDF] last:border-0 ${t.statut === "renvoye" ? "" : "bg-[#FDF8EF]"}`}>
-                <td className="px-1 py-1">
-                  <input type="date" className={cellText + " bz-mono"} value={t.date || ""}
-                    onChange={(e) => update(t.id, { date: e.target.value })} />
-                </td>
-                <td className="px-1 py-1">
-                  <input className={cellText + " font-medium"} placeholder="Nom du teinturier" value={t.teinturier || ""}
-                    onChange={(e) => update(t.id, { teinturier: e.target.value })} />
-                </td>
-                <td className="px-1 py-1">
-                  <input className={cellText} placeholder="Qui a lancé la commande" value={t.lancePar || ""}
-                    onChange={(e) => update(t.id, { lancePar: e.target.value })} />
-                </td>
-                <td className="px-1 py-1">
-                  <select className={cellSelect} value={t.qualite || qualites[0]}
-                    onChange={(e) => update(t.id, { qualite: e.target.value })}>
-                    {qualites.map((q) => <option key={q} value={q}>{q}</option>)}
-                  </select>
-                </td>
-                <td className="px-1 py-1">
-                  <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
-                    value={t.prix ?? ""}
-                    onChange={(e) => update(t.id, { prix: e.target.value })} />
-                </td>
-                <td className="px-1 py-1">
-                  <select
-                    className={cellSelect + (t.statut === "renvoye" ? " text-[#1F6F5C] font-medium" : " text-[#B9832F] font-medium")}
-                    value={t.statut || "en_teinture"}
-                    onChange={(e) => update(t.id, { statut: e.target.value })}>
-                    <option value="en_teinture">Non</option>
-                    <option value="renvoye">Oui</option>
-                  </select>
-                </td>
-                <td className="px-1 py-1">
-                  <input className={cellText} placeholder="" value={t.notes || ""}
-                    onChange={(e) => update(t.id, { notes: e.target.value })} />
-                </td>
-                <td className="px-1 py-1 text-center">
-                  <button onClick={() => remove(t.id)} title="Supprimer la ligne"
-                    className="text-[#C1652F] hover:underline text-sm px-2">✕</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
-        Écrivez directement dans les cases : tout est enregistré automatiquement. Les lignes en jaune clair sont les bazins encore en teinture.
-      </p>
+      {showNew && (
+        <form onSubmit={creerTeinturier} className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-6 flex items-end gap-3">
+          <Field label="Nom du teinturier">
+            <input autoFocus required className={inputCls + " w-72"} value={newName}
+              onChange={(e) => setNewName(e.target.value)} />
+          </Field>
+          <button type="submit" className="bz-sans bg-[#1B2430] text-white px-4 py-2 rounded-sm text-sm">
+            Ouvrir son tableau
+          </button>
+          <button type="button" onClick={() => setShowNew(false)}
+            className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2]">
+            Annuler
+          </button>
+        </form>
+      )}
+
+      {teinturiersAffiches.length === 0 ? (
+        <div className="bg-white border border-[#D8D2C2] rounded-sm p-6">
+          <p className="bz-sans text-sm text-[#9AA0A6]">
+            {teintures.length === 0
+              ? "Aucun teinturier pour l'instant. Cliquez sur « + Nouveau teinturier » : il aura son propre tableau modèle Excel."
+              : "Aucun teinturier ne correspond à cette recherche."}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-4">
+          {teinturiersAffiches.map((t) => (
+            <button key={t.nom} onClick={() => setSelection(t.nom)}
+              className="text-left bg-white border border-[#D8D2C2] rounded-sm p-5 hover:border-[#1F6F5C] transition-colors">
+              <div className="bz-serif text-lg font-semibold mb-1">{t.nom}</div>
+              <div className="bz-sans text-sm text-[#5B5F55]">{t.nb} ligne(s)</div>
+              <div className="bz-sans text-sm mb-2">
+                {t.enTeinture > 0 ? (
+                  <span className="text-[#B9832F]">{t.enTeinture} encore en teinture</span>
+                ) : (
+                  <span className="text-[#1F6F5C]">Tout a été renvoyé</span>
+                )}
+              </div>
+              <div className="bz-mono text-sm">{fcfa(t.total)}</div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
