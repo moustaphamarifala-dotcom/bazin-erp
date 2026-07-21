@@ -1895,7 +1895,8 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
   const cellText = "w-full bg-transparent px-2 py-1.5 text-sm text-[#1B2430] border border-transparent rounded-sm focus:outline-none focus:border-[#1F6F5C] focus:bg-white";
   const cellSelect = cellText + " cursor-pointer";
 
-  const totalDe = (v) => (Number(v.metrage) || 0) * (Number(v.prixMetre) || 0);
+  const articlesDe = (v) => (Number(v.metrage) || 0) * (Number(v.prixMetre) || 0);
+  const totalDe = (v) => articlesDe(v) + (Number(v.transport) || 0);
   const resteDe = (v) => Math.max(0, totalDe(v) - (Number(v.montantPaye) || 0));
   const statutDe = (v) => {
     const total = totalDe(v);
@@ -1940,6 +1941,7 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
         qualite: qualites[0],
         metrage: "",
         prixMetre: "",
+        transport: "",
         montantPaye: "",
         modePaiement: modesPaiement[0],
         deduitStock: false,
@@ -2007,6 +2009,7 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
         { key: "qualite", label: "Qualité" },
         { key: "metrage", label: "Métrage (m)" },
         { key: "prixMetre", label: "Prix par métrage (F CFA)" },
+        { key: "transport", label: "Transport (F CFA)" },
         { key: "total", label: "Total (F CFA)" },
         { key: "montantPaye", label: "Montant payé (F CFA)" },
         { key: "reste", label: "Reste à payer (F CFA)" },
@@ -2072,7 +2075,7 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
       </div>
 
       <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
-        <table className="w-full text-sm bz-sans" style={{ minWidth: "1680px" }}>
+        <table className="w-full text-sm bz-sans" style={{ minWidth: "1800px" }}>
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
               <th className="px-3 py-3 w-36">Date</th>
@@ -2083,6 +2086,7 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
               <th className="px-3 py-3 w-40">Qualité</th>
               <th className="px-3 py-3 w-20">Mètre</th>
               <th className="px-3 py-3 w-24">Prix / m</th>
+              <th className="px-3 py-3 w-24">Transport</th>
               <th className="px-3 py-3 w-28 text-right">Total</th>
               <th className="px-3 py-3 w-28">Payé</th>
               <th className="px-3 py-3 w-28 text-right">Reste</th>
@@ -2095,7 +2099,7 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="16" className="px-5 py-6 text-[#9AA0A6]">
+                <td colSpan="17" className="px-5 py-6 text-[#9AA0A6]">
                   {ventes.length === 0
                     ? "Aucune vente. Cliquez sur « + Nouvelle vente » et remplissez les cases directement, comme dans Excel."
                     : "Aucune vente ne correspond à ce filtre."}
@@ -2148,6 +2152,11 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
                     <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
                       value={v.prixMetre ?? ""}
                       onChange={(e) => update(v.id, { prixMetre: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
+                      value={v.transport ?? ""}
+                      onChange={(e) => update(v.id, { transport: e.target.value })} />
                   </td>
                   <td className="px-3 py-1 bz-mono text-right whitespace-nowrap font-medium">{fcfa(totalDe(v))}</td>
                   <td className="px-1 py-1">
