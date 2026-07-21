@@ -105,6 +105,7 @@ export default function BazinApp() {
   const [commandes, setCommandes] = useState([]);
   const [ventes, setVentes] = useState([]);
   const [caisse, setCaisse] = useState([]);
+  const [productions, setProductions] = useState([]);
 
   /* ---- chargement initial ---- */
   useEffect(() => {
@@ -117,7 +118,7 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d, dep, t, cmd, v, ca] = await Promise.all([
+      const [c, f, s, d, dep, t, cmd, v, ca, prod] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
@@ -127,6 +128,7 @@ export default function BazinApp() {
         load("bazin:commandes", []),
         load("bazin:ventes", []),
         load("bazin:caisse", []),
+        load("bazin:productions", []),
       ]);
       setClients(c);
       setFournisseurs(f);
@@ -137,6 +139,7 @@ export default function BazinApp() {
       setCommandes(cmd);
       setVentes(v);
       setCaisse(ca);
+      setProductions(prod);
       setLoading(false);
     })();
   }, []);
@@ -160,6 +163,7 @@ export default function BazinApp() {
   const saveCommandes = (next) => { setCommandes(next); persist("bazin:commandes", next); };
   const saveVentes = (next) => { setVentes(next); persist("bazin:ventes", next); };
   const saveCaisse = (next) => { setCaisse(next); persist("bazin:caisse", next); };
+  const saveProductions = (next) => { setProductions(next); persist("bazin:productions", next); };
 
   /* ---- dérivés ---- */
   const lowStock = stock.filter((s) => Number(s.quantite) <= Number(s.seuilAlerte));
@@ -238,6 +242,7 @@ export default function BazinApp() {
             ["depenses", "Dépenses"],
             ["teintures", "Teinturiers"],
             ["commandes", "Commandes de bazins"],
+            ["production", "Teinture entreprise"],
             ["ventes", "Ventes"],
           ].map(([key, label]) => (
             <button
@@ -313,6 +318,9 @@ export default function BazinApp() {
         )}
         {tab === "caisse" && (
           <CaisseView caisse={caisse} saveCaisse={saveCaisse} />
+        )}
+        {tab === "production" && (
+          <ProductionView productions={productions} saveProductions={saveProductions} stock={stock} saveStock={saveStock} />
         )}
       </main>
     </div>
@@ -2608,6 +2616,243 @@ function RecuView({ ticket, onClose }) {
         )}
         <div className="text-center text-xs text-[#9AA0A6] mt-5">Merci de votre visite !</div>
       </div>
+    </div>
+  );
+}
+
+/* ============================================================ */
+function ProductionView({ productions, saveProductions, stock, saveStock }) {
+  const [query, setQuery] = useState("");
+
+  const qualites = ["Vainqueur blanc", "Moins riche blanc", "Riche blanc", "Habillement femme", "Habillement homme"];
+
+  const cellText = "w-full bg-transparent px-2 py-1.5 text-sm text-[#1B2430] border border-transparent rounded-sm focus:outline-none focus:border-[#1F6F5C] focus:bg-white";
+  const cellSelect = cellText + " cursor-pointer";
+
+  const totalDe = (p) => (Number(p.metrage) || 0) * (Number(p.prixInitial) || 0);
+
+  // Nom de l'article une fois teint, tel qu'il entrera dans le stock
+  const nomArticle = (p) => {
+    const base = (p.qualite || "Bazin").replace(/\s*blanc$/i, "").trim();
+    const coul = (p.couleur || "").trim();
+    return coul ? `${base} teint ${coul}` : `${base} teint`;
+  };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return productions;
+    return productions.filter((p) =>
+      [p.qualite, p.couleur, p.teinturier, p.notes].some((x) => (x || "").toLowerCase().includes(q))
+    );
+  }, [productions, query]);
+
+  const enCours = productions.filter((p) => p.statut !== "termine").length;
+  const totalCout = filtered.reduce((s, p) => s + totalDe(p), 0);
+
+  const update = (id, patch) =>
+    saveProductions(productions.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+
+  const addRow = () =>
+    saveProductions([
+      ...productions,
+      {
+        id: uid(),
+        date: today(),
+        qualite: qualites[0],
+        couleur: "",
+        teinturier: "",
+        metrage: "",
+        prixInitial: "",
+        statut: "en_cours",
+        enStock: false,
+        qteEntree: 0,
+        stockId: "",
+        notes: "",
+      },
+    ]);
+
+  const remove = (p) => {
+    // si déjà entré en stock, on retire d'abord la quantité ajoutée
+    if (p.enStock && p.stockId) {
+      const item = stock.find((s) => s.id === p.stockId);
+      if (item) saveStock(stock.map((s) => (s.id === item.id ? { ...s, quantite: (Number(s.quantite) || 0) - (Number(p.qteEntree) || 0) } : s)));
+    }
+    saveProductions(productions.filter((x) => x.id !== p.id));
+  };
+
+  // Entrer / retirer du stock de l'entreprise
+  const basculerStock = (p) => {
+    if (p.enStock) {
+      // retirer du stock
+      const item = stock.find((s) => s.id === p.stockId);
+      if (item) saveStock(stock.map((s) => (s.id === item.id ? { ...s, quantite: (Number(s.quantite) || 0) - (Number(p.qteEntree) || 0) } : s)));
+      update(p.id, { enStock: false, qteEntree: 0, stockId: "" });
+      return;
+    }
+    const qte = Number(p.metrage) || 0;
+    if (qte <= 0) {
+      alert("Indiquez d'abord le métrage avant d'entrer en stock.");
+      return;
+    }
+    const nom = nomArticle(p);
+    const existant = stock.find((s) => (s.nom || "").toLowerCase() === nom.toLowerCase());
+    if (existant) {
+      saveStock(stock.map((s) => (s.id === existant.id ? { ...s, quantite: (Number(s.quantite) || 0) + qte } : s)));
+      update(p.id, { enStock: true, qteEntree: qte, stockId: existant.id, statut: "termine" });
+    } else {
+      const nouvel = {
+        id: uid(),
+        nom,
+        quantite: qte,
+        prixUnitaire: Number(p.prixInitial) || 0,
+        seuilAlerte: 0,
+        fournisseurId: "",
+      };
+      saveStock([...stock, nouvel]);
+      update(p.id, { enStock: true, qteEntree: qte, stockId: nouvel.id, statut: "termine" });
+    }
+  };
+
+  const exporter = () =>
+    exportCSV(
+      "bazin-teinture-entreprise.csv",
+      productions.map((p) => ({
+        ...p,
+        total: totalDe(p),
+        statut: p.statut === "termine" ? "Terminé" : "En cours",
+        enStock: p.enStock ? "Oui" : "Non",
+        article: nomArticle(p),
+      })),
+      [
+        { key: "date", label: "Date" },
+        { key: "qualite", label: "Qualité du bazin blanc" },
+        { key: "couleur", label: "Teinture / couleur" },
+        { key: "teinturier", label: "Teinturier" },
+        { key: "metrage", label: "Métrage (m)" },
+        { key: "prixInitial", label: "Prix initial / m (F CFA)" },
+        { key: "total", label: "Coût total (F CFA)" },
+        { key: "statut", label: "Statut" },
+        { key: "article", label: "Article en stock" },
+        { key: "enStock", label: "Entré en stock" },
+        { key: "notes", label: "Notes" },
+      ]
+    );
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h1 className="bz-serif text-3xl font-semibold">Teinture entreprise</h1>
+          <p className="bz-sans text-[#5B5F55]">
+            {productions.length} teinture(s) · {enCours} en cours · coût total : <span className="bz-mono">{fcfa(totalCout)}</span>
+          </p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <SearchBox value={query} onChange={setQuery} placeholder="Rechercher…" />
+          <button onClick={exporter}
+            className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
+            Exporter CSV
+          </button>
+          <button onClick={addRow}
+            className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+            + Nouvelle teinture
+          </button>
+        </div>
+      </div>
+      <p className="bz-sans text-sm text-[#5B5F55] mb-5">
+        Votre bazin blanc part en teinture pour l'entreprise. Une fois terminé, cochez « en stock » : le bazin teint entre directement dans votre stock, prêt à vendre.
+      </p>
+
+      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
+        <table className="w-full text-sm bz-sans" style={{ minWidth: "1240px" }}>
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+              <th className="px-3 py-3 w-36">Date</th>
+              <th className="px-3 py-3 w-44">Qualité du bazin blanc</th>
+              <th className="px-3 py-3">Teinture / couleur</th>
+              <th className="px-3 py-3">Teinturier</th>
+              <th className="px-3 py-3 w-24">Métrage</th>
+              <th className="px-3 py-3 w-28">Prix initial / m</th>
+              <th className="px-3 py-3 w-28 text-right">Coût total</th>
+              <th className="px-3 py-3 w-28">Statut</th>
+              <th className="px-3 py-3 w-52">Stock entreprise</th>
+              <th className="px-3 py-3 w-10"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan="10" className="px-5 py-6 text-[#9AA0A6]">
+                  {productions.length === 0
+                    ? "Aucune teinture. Cliquez sur « + Nouvelle teinture » et remplissez les cases directement, comme dans Excel."
+                    : "Aucun résultat pour cette recherche."}
+                </td>
+              </tr>
+            )}
+            {filtered.map((p) => (
+              <tr key={p.id}
+                className={`border-b border-[#EFEBDF] last:border-0 ${p.statut === "termine" ? "" : "bg-[#FDF8EF]"}`}>
+                <td className="px-1 py-1">
+                  <input type="date" className={cellText + " bz-mono"} value={p.date || ""}
+                    onChange={(e) => update(p.id, { date: e.target.value })} />
+                </td>
+                <td className="px-1 py-1">
+                  <select className={cellSelect} value={p.qualite || qualites[0]}
+                    disabled={p.enStock}
+                    onChange={(e) => update(p.id, { qualite: e.target.value })}>
+                    {qualites.map((q) => <option key={q} value={q}>{q}</option>)}
+                  </select>
+                </td>
+                <td className="px-1 py-1">
+                  <input className={cellText} placeholder="ex. bleu, vert, bogolan…" value={p.couleur || ""}
+                    disabled={p.enStock}
+                    onChange={(e) => update(p.id, { couleur: e.target.value })} />
+                </td>
+                <td className="px-1 py-1">
+                  <input className={cellText} placeholder="Nom du teinturier" value={p.teinturier || ""}
+                    onChange={(e) => update(p.id, { teinturier: e.target.value })} />
+                </td>
+                <td className="px-1 py-1">
+                  <input type="number" min="0" step="0.5" className={cellText + " bz-mono text-right"} placeholder="0"
+                    value={p.metrage ?? ""} disabled={p.enStock}
+                    onChange={(e) => update(p.id, { metrage: e.target.value })} />
+                </td>
+                <td className="px-1 py-1">
+                  <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
+                    value={p.prixInitial ?? ""}
+                    onChange={(e) => update(p.id, { prixInitial: e.target.value })} />
+                </td>
+                <td className="px-3 py-1 bz-mono text-right whitespace-nowrap font-medium">{fcfa(totalDe(p))}</td>
+                <td className="px-1 py-1">
+                  <select
+                    className={cellSelect + (p.statut === "termine" ? " text-[#1F6F5C] font-medium" : " text-[#B9832F] font-medium")}
+                    value={p.statut || "en_cours"}
+                    onChange={(e) => update(p.id, { statut: e.target.value })}>
+                    <option value="en_cours">En cours</option>
+                    <option value="termine">Terminé</option>
+                  </select>
+                </td>
+                <td className="px-2 py-1 text-xs whitespace-nowrap">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" checked={!!p.enStock} onChange={() => basculerStock(p)} />
+                    {p.enStock
+                      ? <span className="text-[#1F6F5C]">en stock ({p.qteEntree} m) · {nomArticle(p)}</span>
+                      : <span className="text-[#5B5F55]">entrer en stock</span>}
+                  </label>
+                </td>
+                <td className="px-1 py-1 text-center">
+                  <button onClick={() => remove(p)} title="Supprimer la ligne"
+                    className="text-[#C1652F] hover:underline text-sm px-2">✕</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
+        Le « prix initial » est votre coût de revient par mètre (bazin blanc + teinture). Quand vous cochez « entrer en stock », le métrage est ajouté à un article
+        « {"{qualité}"} teint {"{couleur}"} » dans l'onglet Stock (créé automatiquement s'il n'existe pas encore). Décochez pour annuler l'entrée en stock.
+      </p>
     </div>
   );
 }
