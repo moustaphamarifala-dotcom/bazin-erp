@@ -225,6 +225,7 @@ export default function BazinApp() {
         <nav className="flex-1 px-3 py-4 flex flex-col gap-1">
           {[
             ["dashboard", "Tableau de bord"],
+            ["rappels", "Rappels WhatsApp"],
             ["clients", "Clients"],
             ["fournisseurs", "Fournisseurs"],
             ["stock", "Stock"],
@@ -301,6 +302,9 @@ export default function BazinApp() {
         )}
         {tab === "ventes" && (
           <VentesView ventes={ventes} saveVentes={saveVentes} stock={stock} saveStock={saveStock} />
+        )}
+        {tab === "rappels" && (
+          <RappelsView ventes={ventes} commandes={commandes} />
         )}
       </main>
     </div>
@@ -2111,6 +2115,129 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
         Choisissez un « Article du stock » puis cochez « déduire » : la quantité vendue est retirée du stock (inventaire à jour en même temps que la vente).
         Décochez pour rendre la quantité au stock. Les lignes en jaune clair ne sont pas encore entièrement payées.
       </p>
+    </div>
+  );
+}
+
+/* ============================================================ */
+function RappelsView({ ventes, commandes }) {
+  const totalVente = (v) => (Number(v.metrage) || 0) * (Number(v.prixMetre) || 0);
+  const resteVente = (v) => Math.max(0, totalVente(v) - (Number(v.montantPaye) || 0));
+  const totalCmd = (c) => (Number(c.metrage) || 0) * (Number(c.prixMetre) || 0);
+
+  const credits = ventes
+    .filter((v) => resteVente(v) > 0)
+    .sort((a, b) => resteVente(b) - resteVente(a));
+  const totalCredits = credits.reduce((s, v) => s + resteVente(v), 0);
+
+  const aRetirer = commandes
+    .filter((c) => c.statut !== "retiree")
+    .sort((a, b) => (a.dateRetrait || "") < (b.dateRetrait || "") ? -1 : 1);
+
+  const boutonWA = "inline-flex items-center gap-2 bg-[#25D366] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#1EBE5A] whitespace-nowrap";
+  const sansNumero = "text-xs text-[#9AA0A6] italic whitespace-nowrap";
+
+  return (
+    <div>
+      <h1 className="bz-serif text-3xl font-semibold mb-1">Rappels WhatsApp</h1>
+      <p className="bz-sans text-[#5B5F55] mb-8">
+        Appuyez sur un bouton vert : votre WhatsApp s'ouvre avec le message déjà écrit, vous n'avez plus qu'à envoyer.
+      </p>
+
+      {/* ---- Clients qui doivent de l'argent ---- */}
+      <div className="mb-10">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="bz-serif text-xl font-semibold">Clients qui doivent de l'argent</h2>
+          <span className="bz-sans text-sm text-[#5B5F55]">
+            {credits.length} client(s) · reste <span className="bz-mono text-[#C1652F] font-medium">{fcfa(totalCredits)}</span>
+          </span>
+        </div>
+
+        {credits.length === 0 ? (
+          <div className="bg-white border border-[#D8D2C2] rounded-sm p-6 bz-sans text-sm text-[#9AA0A6]">
+            Aucun client ne vous doit de l'argent. 👍
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {credits.map((v) => (
+              <div key={v.id}
+                className="bg-white border border-[#D8D2C2] rounded-sm p-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="bz-sans font-medium text-[#1B2430]">{v.client || "Client sans nom"}</div>
+                  <div className="bz-sans text-sm text-[#5B5F55]">
+                    {v.article || "Vente"}{v.date ? ` · ${fmtDate(v.date)}` : ""}
+                    {v.telephone ? ` · ${v.telephone}` : ""}
+                  </div>
+                  <div className="bz-sans text-sm mt-0.5">
+                    Total <span className="bz-mono">{fcfa(totalVente(v))}</span>
+                    {" · "}Payé <span className="bz-mono">{fcfa(Number(v.montantPaye) || 0)}</span>
+                    {" · "}<span className="text-[#C1652F] font-medium">Reste <span className="bz-mono">{fcfa(resteVente(v))}</span></span>
+                  </div>
+                </div>
+                {v.telephone ? (
+                  <button className={boutonWA}
+                    onClick={() =>
+                      ouvrirWhatsApp(
+                        v.telephone,
+                        `Bonjour${v.client ? " " + v.client : ""}, petit rappel concernant votre achat${v.article ? " de " + v.article : ""} du ${fmtDate(v.date)} d'un montant de ${fcfa(totalVente(v))}. Il reste ${fcfa(resteVente(v))} à régler. Merci !`
+                      )
+                    }>
+                    <span>Rappeler sur WhatsApp</span>
+                  </button>
+                ) : (
+                  <span className={sansNumero}>Ajoutez un numéro dans Ventes</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ---- Commandes à retirer ---- */}
+      <div>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="bz-serif text-xl font-semibold">Commandes à prévenir / retirer</h2>
+          <span className="bz-sans text-sm text-[#5B5F55]">{aRetirer.length} commande(s) non retirée(s)</span>
+        </div>
+
+        {aRetirer.length === 0 ? (
+          <div className="bg-white border border-[#D8D2C2] rounded-sm p-6 bz-sans text-sm text-[#9AA0A6]">
+            Aucune commande en attente de retrait.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {aRetirer.map((c) => (
+              <div key={c.id}
+                className="bg-white border border-[#D8D2C2] rounded-sm p-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="bz-sans font-medium text-[#1B2430]">{c.client || "Client sans nom"}</div>
+                  <div className="bz-sans text-sm text-[#5B5F55]">
+                    {c.typeCommande || "Commande"}
+                    {c.telephone ? ` · ${c.telephone}` : ""}
+                    {c.dateRetrait ? ` · retrait prévu le ${fmtDate(c.dateRetrait)}` : ""}
+                  </div>
+                  {totalCmd(c) > 0 && (
+                    <div className="bz-sans text-sm mt-0.5">Montant <span className="bz-mono">{fcfa(totalCmd(c))}</span></div>
+                  )}
+                </div>
+                {c.telephone ? (
+                  <button className={boutonWA}
+                    onClick={() =>
+                      ouvrirWhatsApp(
+                        c.telephone,
+                        `Bonjour${c.client ? " " + c.client : ""}, votre commande${c.typeCommande ? " (" + c.typeCommande + ")" : ""} est prête. Vous pouvez venir la retirer. Merci !`
+                      )
+                    }>
+                    <span>Prévenir sur WhatsApp</span>
+                  </button>
+                ) : (
+                  <span className={sansNumero}>Ajoutez un numéro dans Commandes</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
