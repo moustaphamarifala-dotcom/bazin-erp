@@ -282,7 +282,7 @@ export default function BazinApp() {
           <CommandesView commandes={commandes} saveCommandes={saveCommandes} />
         )}
         {tab === "ventes" && (
-          <VentesView ventes={ventes} saveVentes={saveVentes} />
+          <VentesView ventes={ventes} saveVentes={saveVentes} stock={stock} saveStock={saveStock} />
         )}
       </main>
     </div>
@@ -1748,7 +1748,7 @@ function CommandesView({ commandes, saveCommandes }) {
 }
 
 /* ============================================================ */
-function VentesView({ ventes, saveVentes }) {
+function VentesView({ ventes, saveVentes, stock, saveStock }) {
   const [query, setQuery] = useState("");
   const [filtreStatut, setFiltreStatut] = useState("tous");
 
@@ -1761,6 +1761,7 @@ function VentesView({ ventes, saveVentes }) {
     "Bazin teint",
     "Autre",
   ];
+  const modesPaiement = ["Espèces", "Wave", "Orange Money", "Free Money", "Virement", "Chèque", "Crédit", "Autre"];
 
   const cellText = "w-full bg-transparent px-2 py-1.5 text-sm text-[#1B2430] border border-transparent rounded-sm focus:outline-none focus:border-[#1F6F5C] focus:bg-white";
   const cellSelect = cellText + " cursor-pointer";
@@ -1785,7 +1786,7 @@ function VentesView({ ventes, saveVentes }) {
     return ventes.filter((v) => {
       if (filtreStatut !== "tous" && statutDe(v) !== filtreStatut) return false;
       if (!q) return true;
-      return [v.client, v.telephone, v.article, v.qualite, v.notes]
+      return [v.client, v.telephone, v.article, v.qualite, v.modePaiement, v.notes]
         .some((x) => (x || "").toLowerCase().includes(q));
     });
   }, [ventes, query, filtreStatut]);
@@ -1805,11 +1806,15 @@ function VentesView({ ventes, saveVentes }) {
         date: today(),
         client: "",
         telephone: "",
+        stockId: "",
         article: "",
         qualite: qualites[0],
         metrage: "",
         prixMetre: "",
         montantPaye: "",
+        modePaiement: modesPaiement[0],
+        deduitStock: false,
+        qteDeduit: 0,
         notes: "",
       },
     ]);
@@ -1819,7 +1824,42 @@ function VentesView({ ventes, saveVentes }) {
     if (v) update(id, { montantPaye: totalDe(v) });
   };
 
-  const remove = (id) => saveVentes(ventes.filter((v) => v.id !== id));
+  // Choisir un article du stock : remplit le nom et le prix
+  const choisirStock = (v, stockId) => {
+    const item = stock.find((s) => s.id === stockId);
+    const patch = { stockId };
+    if (item) {
+      patch.article = item.nom;
+      if (!v.prixMetre) patch.prixMetre = item.prixUnitaire;
+    }
+    update(v.id, patch);
+  };
+
+  // Déduire / rendre la quantité vendue au stock
+  const basculerDeduction = (v) => {
+    const item = stock.find((s) => s.id === v.stockId);
+    if (!item) {
+      alert("Choisissez d'abord un article du stock sur cette ligne.");
+      return;
+    }
+    if (v.deduitStock) {
+      // rendre au stock
+      saveStock(stock.map((s) => (s.id === item.id ? { ...s, quantite: (Number(s.quantite) || 0) + (Number(v.qteDeduit) || 0) } : s)));
+      update(v.id, { deduitStock: false, qteDeduit: 0 });
+    } else {
+      const qte = Number(v.metrage) || 0;
+      saveStock(stock.map((s) => (s.id === item.id ? { ...s, quantite: (Number(s.quantite) || 0) - qte } : s)));
+      update(v.id, { deduitStock: true, qteDeduit: qte });
+    }
+  };
+
+  const remove = (v) => {
+    if (v.deduitStock && v.stockId) {
+      const item = stock.find((s) => s.id === v.stockId);
+      if (item) saveStock(stock.map((s) => (s.id === item.id ? { ...s, quantite: (Number(s.quantite) || 0) + (Number(v.qteDeduit) || 0) } : s)));
+    }
+    saveVentes(ventes.filter((x) => x.id !== v.id));
+  };
 
   const exportVentes = () =>
     exportCSV(
@@ -1841,6 +1881,7 @@ function VentesView({ ventes, saveVentes }) {
         { key: "total", label: "Total (F CFA)" },
         { key: "montantPaye", label: "Montant payé (F CFA)" },
         { key: "reste", label: "Reste à payer (F CFA)" },
+        { key: "modePaiement", label: "Mode de paiement" },
         { key: "statut", label: "Statut" },
         { key: "notes", label: "Notes" },
       ]
@@ -1902,27 +1943,30 @@ function VentesView({ ventes, saveVentes }) {
       </div>
 
       <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
-        <table className="w-full text-sm bz-sans" style={{ minWidth: "1360px" }}>
+        <table className="w-full text-sm bz-sans" style={{ minWidth: "1680px" }}>
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
               <th className="px-3 py-3 w-36">Date</th>
               <th className="px-3 py-3">Client</th>
               <th className="px-3 py-3 w-32">Numéro</th>
+              <th className="px-3 py-3 w-48">Article du stock</th>
               <th className="px-3 py-3">Article vendu</th>
-              <th className="px-3 py-3 w-44">Qualité</th>
-              <th className="px-3 py-3 w-24">Métrage</th>
-              <th className="px-3 py-3 w-28">Prix / m</th>
+              <th className="px-3 py-3 w-40">Qualité</th>
+              <th className="px-3 py-3 w-20">Mètre</th>
+              <th className="px-3 py-3 w-24">Prix / m</th>
               <th className="px-3 py-3 w-28 text-right">Total</th>
-              <th className="px-3 py-3 w-32">Payé</th>
+              <th className="px-3 py-3 w-28">Payé</th>
               <th className="px-3 py-3 w-28 text-right">Reste</th>
-              <th className="px-3 py-3 w-28">Statut</th>
+              <th className="px-3 py-3 w-36">Mode paiement</th>
+              <th className="px-3 py-3 w-24">Statut</th>
+              <th className="px-3 py-3 w-40">Stock</th>
               <th className="px-3 py-3 w-16"></th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="12" className="px-5 py-6 text-[#9AA0A6]">
+                <td colSpan="15" className="px-5 py-6 text-[#9AA0A6]">
                   {ventes.length === 0
                     ? "Aucune vente. Cliquez sur « + Nouvelle vente » et remplissez les cases directement, comme dans Excel."
                     : "Aucune vente ne correspond à ce filtre."}
@@ -1932,6 +1976,7 @@ function VentesView({ ventes, saveVentes }) {
             {filtered.map((v) => {
               const st = statutDe(v);
               const reste = resteDe(v);
+              const item = stock.find((s) => s.id === v.stockId);
               return (
                 <tr key={v.id}
                   className={`border-b border-[#EFEBDF] last:border-0 ${st === "paye" ? "" : "bg-[#FDF8EF]"}`}>
@@ -1946,6 +1991,14 @@ function VentesView({ ventes, saveVentes }) {
                   <td className="px-1 py-1">
                     <input className={cellText + " bz-mono"} placeholder="Téléphone" value={v.telephone || ""}
                       onChange={(e) => update(v.id, { telephone: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <select className={cellSelect} value={v.stockId || ""}
+                      disabled={v.deduitStock}
+                      onChange={(e) => choisirStock(v, e.target.value)}>
+                      <option value="">— hors stock —</option>
+                      {stock.map((s) => <option key={s.id} value={s.id}>{s.nom}</option>)}
+                    </select>
                   </td>
                   <td className="px-1 py-1">
                     <input className={cellText} placeholder="Ce qui est vendu" value={v.article || ""}
@@ -1976,15 +2029,34 @@ function VentesView({ ventes, saveVentes }) {
                   <td className={`px-3 py-1 bz-mono text-right whitespace-nowrap ${reste > 0 ? "text-[#C1652F] font-medium" : "text-[#9AA0A6]"}`}>
                     {fcfa(reste)}
                   </td>
+                  <td className="px-1 py-1">
+                    <select className={cellSelect} value={v.modePaiement || modesPaiement[0]}
+                      onChange={(e) => update(v.id, { modePaiement: e.target.value })}>
+                      {modesPaiement.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </td>
                   <td className="px-2 py-1 whitespace-nowrap">
                     <Tampon label={statutInfo[st].label} tone={statutInfo[st].tone} />
+                  </td>
+                  <td className="px-2 py-1 text-xs whitespace-nowrap">
+                    {v.stockId ? (
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" checked={!!v.deduitStock}
+                          onChange={() => basculerDeduction(v)} />
+                        {v.deduitStock
+                          ? <span className="text-[#1F6F5C]">retiré ({v.qteDeduit} m)</span>
+                          : <span className="text-[#5B5F55]">déduire · reste {item ? item.quantite : "?"}</span>}
+                      </label>
+                    ) : (
+                      <span className="text-[#9AA0A6]">—</span>
+                    )}
                   </td>
                   <td className="px-1 py-1 text-right whitespace-nowrap">
                     {st !== "paye" && (
                       <button onClick={() => solder(v.id)} title="Marquer entièrement payé"
                         className="text-[#1F6F5C] hover:underline text-xs mr-2">Soldé</button>
                     )}
-                    <button onClick={() => remove(v.id)} title="Supprimer la ligne"
+                    <button onClick={() => remove(v)} title="Supprimer la ligne"
                       className="text-[#C1652F] hover:underline text-sm">✕</button>
                   </td>
                 </tr>
@@ -1995,7 +2067,8 @@ function VentesView({ ventes, saveVentes }) {
       </div>
       <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
         Écrivez directement dans les cases : tout est enregistré automatiquement. Le total et le reste à payer se calculent tout seuls.
-        Les lignes en jaune clair sont les ventes pas encore entièrement payées. « Soldé » indique que le client a tout réglé.
+        Choisissez un « Article du stock » puis cochez « déduire » : la quantité vendue est retirée du stock (inventaire à jour en même temps que la vente).
+        Décochez pour rendre la quantité au stock. Les lignes en jaune clair ne sont pas encore entièrement payées.
       </p>
     </div>
   );
