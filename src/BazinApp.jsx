@@ -104,6 +104,7 @@ export default function BazinApp() {
   const [teintures, setTeintures] = useState([]);
   const [commandes, setCommandes] = useState([]);
   const [ventes, setVentes] = useState([]);
+  const [caisse, setCaisse] = useState([]);
 
   /* ---- chargement initial ---- */
   useEffect(() => {
@@ -116,7 +117,7 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d, dep, t, cmd, v] = await Promise.all([
+      const [c, f, s, d, dep, t, cmd, v, ca] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
@@ -125,6 +126,7 @@ export default function BazinApp() {
         load("bazin:teintures", []),
         load("bazin:commandes", []),
         load("bazin:ventes", []),
+        load("bazin:caisse", []),
       ]);
       setClients(c);
       setFournisseurs(f);
@@ -134,6 +136,7 @@ export default function BazinApp() {
       setTeintures(t);
       setCommandes(cmd);
       setVentes(v);
+      setCaisse(ca);
       setLoading(false);
     })();
   }, []);
@@ -156,6 +159,7 @@ export default function BazinApp() {
   const saveTeintures = (next) => { setTeintures(next); persist("bazin:teintures", next); };
   const saveCommandes = (next) => { setCommandes(next); persist("bazin:commandes", next); };
   const saveVentes = (next) => { setVentes(next); persist("bazin:ventes", next); };
+  const saveCaisse = (next) => { setCaisse(next); persist("bazin:caisse", next); };
 
   /* ---- dérivés ---- */
   const lowStock = stock.filter((s) => Number(s.quantite) <= Number(s.seuilAlerte));
@@ -225,6 +229,7 @@ export default function BazinApp() {
         <nav className="flex-1 px-3 py-4 flex flex-col gap-1">
           {[
             ["dashboard", "Tableau de bord"],
+            ["caisse", "Caisse"],
             ["rappels", "Rappels WhatsApp"],
             ["clients", "Clients"],
             ["fournisseurs", "Fournisseurs"],
@@ -305,6 +310,9 @@ export default function BazinApp() {
         )}
         {tab === "rappels" && (
           <RappelsView ventes={ventes} commandes={commandes} />
+        )}
+        {tab === "caisse" && (
+          <CaisseView caisse={caisse} saveCaisse={saveCaisse} />
         )}
       </main>
     </div>
@@ -2237,6 +2245,368 @@ function RappelsView({ ventes, commandes }) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================ */
+const MODES_CAISSE = ["Espèces", "Wave", "Orange Money", "Free Money", "Carte", "Autre"];
+
+function ligneMontant(l) {
+  return (Number(l.quantite) || 0) * (Number(l.prixUnitaire) || 0);
+}
+function ticketTotal(t) {
+  return (t.lignes || []).reduce((s, l) => s + ligneMontant(l), 0);
+}
+
+function CaisseView({ caisse, saveCaisse }) {
+  const [jour, setJour] = useState(today());
+  const [draft, setDraft] = useState(null); // encaissement en cours
+  const [recu, setRecu] = useState(null); // ticket affiché en reçu
+
+  const nextNumero = () => {
+    const year = new Date().getFullYear();
+    return `T-${year}-${String(caisse.length + 1).padStart(3, "0")}`;
+  };
+
+  const nouveau = () =>
+    setDraft({
+      id: uid(),
+      numero: nextNumero(),
+      dateTime: new Date().toISOString(),
+      client: "",
+      telephone: "",
+      mode: MODES_CAISSE[0],
+      recu: "",
+      notes: "",
+      lignes: [{ id: uid(), description: "", quantite: 1, prixUnitaire: "" }],
+    });
+
+  const addLigne = () =>
+    setDraft({ ...draft, lignes: [...draft.lignes, { id: uid(), description: "", quantite: 1, prixUnitaire: "" }] });
+  const updLigne = (i, patch) =>
+    setDraft({ ...draft, lignes: draft.lignes.map((l, idx) => (idx === i ? { ...l, ...patch } : l)) });
+  const rmLigne = (i) =>
+    setDraft({ ...draft, lignes: draft.lignes.filter((_, idx) => idx !== i) });
+
+  const totalDraft = draft ? ticketTotal(draft) : 0;
+  const monnaie = draft && draft.mode === "Espèces" && draft.recu !== ""
+    ? (Number(draft.recu) || 0) - totalDraft
+    : null;
+
+  const encaisser = (e) => {
+    e.preventDefault();
+    if (totalDraft <= 0) {
+      alert("Ajoutez au moins un article avec un montant.");
+      return;
+    }
+    const ticket = { ...draft, dateTime: new Date().toISOString() };
+    saveCaisse([...caisse, ticket]);
+    setDraft(null);
+    setRecu(ticket);
+    setJour(ticket.dateTime.slice(0, 10));
+  };
+
+  const supprimer = (id) => {
+    if (window.confirm("Supprimer ce ticket de la caisse ?")) {
+      saveCaisse(caisse.filter((t) => t.id !== id));
+    }
+  };
+
+  const ticketsJour = caisse
+    .filter((t) => (t.dateTime || "").slice(0, 10) === jour)
+    .sort((a, b) => (a.dateTime < b.dateTime ? 1 : -1));
+
+  const totalJour = ticketsJour.reduce((s, t) => s + ticketTotal(t), 0);
+  const parMode = MODES_CAISSE
+    .map((m) => ({ mode: m, total: ticketsJour.filter((t) => t.mode === m).reduce((s, t) => s + ticketTotal(t), 0) }))
+    .filter((x) => x.total > 0);
+
+  const exporter = () =>
+    exportCSV(
+      `bazin-caisse-${jour}.csv`,
+      ticketsJour.map((t) => ({
+        heure: (t.dateTime || "").slice(11, 16),
+        numero: t.numero,
+        client: t.client,
+        articles: (t.lignes || []).map((l) => `${l.quantite}x ${l.description}`).join(", "),
+        mode: t.mode,
+        total: ticketTotal(t),
+      })),
+      [
+        { key: "heure", label: "Heure" },
+        { key: "numero", label: "Ticket" },
+        { key: "client", label: "Client" },
+        { key: "articles", label: "Articles" },
+        { key: "mode", label: "Mode de paiement" },
+        { key: "total", label: "Total (F CFA)" },
+      ]
+    );
+
+  return (
+    <div>
+      {recu && <RecuView ticket={recu} onClose={() => setRecu(null)} />}
+
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="bz-serif text-3xl font-semibold">Caisse</h1>
+          <p className="bz-sans text-[#5B5F55]">Encaissez, imprimez ou envoyez le reçu, suivez la caisse du jour.</p>
+        </div>
+        {!draft && (
+          <button onClick={nouveau}
+            className="bz-sans bg-[#1F6F5C] text-white px-5 py-3 rounded-sm text-base font-medium hover:bg-[#195A4A]">
+            + Encaisser
+          </button>
+        )}
+      </div>
+
+      {/* ---- Écran d'encaissement ---- */}
+      {draft && (
+        <form onSubmit={encaisser} className="bg-white border border-[#1F6F5C] rounded-sm p-5 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="bz-serif text-xl font-semibold">Encaissement</h2>
+            <span className="bz-mono text-sm text-[#9AA0A6]">{draft.numero}</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <Field label="Client (facultatif)">
+              <input className={inputCls} value={draft.client}
+                onChange={(e) => setDraft({ ...draft, client: e.target.value })} />
+            </Field>
+            <Field label="Téléphone (pour envoyer le reçu)">
+              <input className={inputCls} value={draft.telephone}
+                onChange={(e) => setDraft({ ...draft, telephone: e.target.value })} />
+            </Field>
+          </div>
+
+          <div className="text-sm font-medium text-[#5B5F55] mb-2">Articles</div>
+          <div className="flex flex-col gap-2 mb-2">
+            {draft.lignes.map((l, i) => (
+              <div key={l.id} className="grid grid-cols-12 gap-2 items-center">
+                <input className={inputCls + " col-span-6"} placeholder="Article / description" value={l.description}
+                  onChange={(e) => updLigne(i, { description: e.target.value })} />
+                <input type="number" min="0" step="0.5" className={inputCls + " col-span-2 text-right"} placeholder="Qté"
+                  value={l.quantite} onChange={(e) => updLigne(i, { quantite: e.target.value })} />
+                <input type="number" min="0" step="1" className={inputCls + " col-span-3 text-right"} placeholder="Prix unité"
+                  value={l.prixUnitaire} onChange={(e) => updLigne(i, { prixUnitaire: e.target.value })} />
+                <button type="button" onClick={() => rmLigne(i)}
+                  className="col-span-1 text-[#C1652F] hover:underline text-sm">✕</button>
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={addLigne} className="bz-sans text-sm text-[#1F6F5C] hover:underline mb-4">
+            + Ajouter un article
+          </button>
+
+          <div className="grid grid-cols-3 gap-4 items-end border-t border-[#EFEBDF] pt-4">
+            <Field label="Mode de paiement">
+              <select className={inputCls} value={draft.mode}
+                onChange={(e) => setDraft({ ...draft, mode: e.target.value })}>
+                {MODES_CAISSE.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </Field>
+            {draft.mode === "Espèces" ? (
+              <Field label="Montant reçu (pour la monnaie)">
+                <input type="number" min="0" step="1" className={inputCls + " text-right"} placeholder="0"
+                  value={draft.recu} onChange={(e) => setDraft({ ...draft, recu: e.target.value })} />
+              </Field>
+            ) : <div />}
+            <div className="text-right">
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6]">Total à payer</div>
+              <div className="bz-mono text-3xl font-semibold">{fcfa(totalDraft)}</div>
+              {monnaie !== null && monnaie >= 0 && (
+                <div className="bz-sans text-sm text-[#1F6F5C] mt-1">Monnaie à rendre : <span className="bz-mono">{fcfa(monnaie)}</span></div>
+              )}
+              {monnaie !== null && monnaie < 0 && (
+                <div className="bz-sans text-sm text-[#C1652F] mt-1">Manque : <span className="bz-mono">{fcfa(-monnaie)}</span></div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex gap-3 mt-5">
+            <button type="submit"
+              className="bz-sans bg-[#1F6F5C] text-white px-5 py-2.5 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+              Encaisser et voir le reçu
+            </button>
+            <button type="button" onClick={() => setDraft(null)}
+              className="bz-sans px-4 py-2.5 rounded-sm text-sm border border-[#D8D2C2]">
+              Annuler
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* ---- Caisse du jour ---- */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="bz-serif text-xl font-semibold">Caisse du jour</h2>
+        <div className="flex gap-2 items-center">
+          <input type="date" className={inputCls + " bz-mono"} value={jour}
+            onChange={(e) => setJour(e.target.value)} />
+          {ticketsJour.length > 0 && (
+            <button onClick={exporter}
+              className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
+              Exporter CSV
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Total encaissé</div>
+          <div className="bz-mono text-2xl font-medium text-[#1F6F5C]">{fcfa(totalJour)}</div>
+        </div>
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Nombre de ventes</div>
+          <div className="bz-mono text-2xl font-medium">{ticketsJour.length}</div>
+        </div>
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Détail par paiement</div>
+          {parMode.length === 0 ? (
+            <div className="bz-sans text-sm text-[#9AA0A6]">—</div>
+          ) : (
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+              {parMode.map((x) => (
+                <span key={x.mode} className="bz-sans text-sm">
+                  {x.mode} <span className="bz-mono font-medium">{fcfa(x.total)}</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-hidden">
+        {ticketsJour.length === 0 ? (
+          <p className="bz-sans text-sm text-[#9AA0A6] p-6">
+            Aucune vente pour ce jour. Cliquez sur « + Encaisser » pour votre première vente.
+          </p>
+        ) : (
+          <table className="w-full text-sm bz-sans">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+                <th className="px-5 py-3 w-20">Heure</th>
+                <th className="px-5 py-3 w-28">Ticket</th>
+                <th className="px-5 py-3">Client / articles</th>
+                <th className="px-5 py-3 w-32">Paiement</th>
+                <th className="px-5 py-3 w-32 text-right">Total</th>
+                <th className="px-5 py-3 text-right"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {ticketsJour.map((t) => (
+                <tr key={t.id} className="bz-row border-b border-[#EFEBDF] last:border-0">
+                  <td className="px-5 py-3 bz-mono">{(t.dateTime || "").slice(11, 16)}</td>
+                  <td className="px-5 py-3 bz-mono">{t.numero}</td>
+                  <td className="px-5 py-3">
+                    {t.client && <span className="font-medium">{t.client} · </span>}
+                    <span className="text-[#5B5F55]">
+                      {(t.lignes || []).map((l) => `${l.quantite}× ${l.description || "article"}`).join(", ")}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3">{t.mode}</td>
+                  <td className="px-5 py-3 bz-mono text-right font-medium">{fcfa(ticketTotal(t))}</td>
+                  <td className="px-5 py-3 text-right whitespace-nowrap">
+                    <button onClick={() => setRecu(t)} className="text-[#1B2430] mr-3 hover:underline">Reçu</button>
+                    {t.telephone && (
+                      <button
+                        onClick={() =>
+                          ouvrirWhatsApp(t.telephone, texteRecu(t))
+                        }
+                        className="text-[#1F6F5C] mr-3 hover:underline">WhatsApp</button>
+                    )}
+                    <button onClick={() => supprimer(t.id)} className="text-[#C1652F] hover:underline">✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Texte du reçu pour WhatsApp */
+function texteRecu(t) {
+  const lignes = (t.lignes || [])
+    .map((l) => `- ${l.quantite}× ${l.description || "article"} : ${fcfa(ligneMontant(l))}`)
+    .join("\n");
+  const d = t.dateTime || "";
+  return `*Bazin* — Reçu ${t.numero}\n${fmtDate(d.slice(0, 10))} ${d.slice(11, 16)}\n${lignes}\n\nTotal : ${fcfa(ticketTotal(t))}\nPayé par : ${t.mode}\n\nMerci de votre visite !`;
+}
+
+/* ---------- Reçu imprimable ---------- */
+function RecuView({ ticket, onClose }) {
+  const total = ticketTotal(ticket);
+  const d = ticket.dateTime || "";
+  const monnaie = ticket.mode === "Espèces" && ticket.recu !== "" && ticket.recu != null
+    ? (Number(ticket.recu) || 0) - total
+    : null;
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center overflow-y-auto py-10">
+      <div className="bz-no-print fixed top-4 right-4 flex gap-2">
+        <button onClick={() => window.print()} className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm">
+          Imprimer / PDF
+        </button>
+        {ticket.telephone && (
+          <button onClick={() => ouvrirWhatsApp(ticket.telephone, texteRecu(ticket))}
+            className="bz-sans bg-[#25D366] text-white px-4 py-2 rounded-sm text-sm">
+            Envoyer sur WhatsApp
+          </button>
+        )}
+        <button onClick={onClose} className="bz-sans bg-white px-4 py-2 rounded-sm text-sm border border-[#D8D2C2]">
+          Fermer
+        </button>
+      </div>
+
+      <div className="bz-print-area bg-white px-8 py-8 bz-sans text-[#1B2430]" style={{ width: "320px" }}>
+        <div className="text-center mb-4">
+          <div className="bz-serif text-2xl font-semibold">Bazin</div>
+          <div className="text-xs text-[#9AA0A6]">Reçu de caisse</div>
+        </div>
+        <div className="text-xs text-[#5B5F55] mb-3 flex justify-between">
+          <span className="bz-mono">{ticket.numero}</span>
+          <span className="bz-mono">{fmtDate(d.slice(0, 10))} {d.slice(11, 16)}</span>
+        </div>
+        {ticket.client && <div className="text-sm mb-3">Client : {ticket.client}</div>}
+        <div className="border-t border-dashed border-[#9AA0A6] my-2" />
+        <table className="w-full text-sm">
+          <tbody>
+            {(ticket.lignes || []).map((l) => (
+              <tr key={l.id} className="align-top">
+                <td className="py-1">
+                  {l.description || "Article"}
+                  <div className="text-xs text-[#9AA0A6] bz-mono">{l.quantite} × {fcfa(l.prixUnitaire)}</div>
+                </td>
+                <td className="py-1 text-right bz-mono whitespace-nowrap">{fcfa(ligneMontant(l))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="border-t border-dashed border-[#9AA0A6] my-2" />
+        <div className="flex justify-between text-lg font-semibold">
+          <span className="bz-serif">Total</span>
+          <span className="bz-mono">{fcfa(total)}</span>
+        </div>
+        <div className="text-sm mt-2 flex justify-between">
+          <span className="text-[#5B5F55]">Paiement</span>
+          <span>{ticket.mode}</span>
+        </div>
+        {monnaie !== null && monnaie >= 0 && ticket.recu !== "" && (
+          <>
+            <div className="text-sm flex justify-between">
+              <span className="text-[#5B5F55]">Reçu</span>
+              <span className="bz-mono">{fcfa(ticket.recu)}</span>
+            </div>
+            <div className="text-sm flex justify-between">
+              <span className="text-[#5B5F55]">Monnaie</span>
+              <span className="bz-mono">{fcfa(monnaie)}</span>
+            </div>
+          </>
+        )}
+        <div className="text-center text-xs text-[#9AA0A6] mt-5">Merci de votre visite !</div>
       </div>
     </div>
   );
