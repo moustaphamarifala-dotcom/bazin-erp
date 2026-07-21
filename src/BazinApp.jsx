@@ -2717,7 +2717,8 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
   const cellText = "w-full bg-transparent px-2 py-1.5 text-sm text-[#1B2430] border border-transparent rounded-sm focus:outline-none focus:border-[#1F6F5C] focus:bg-white";
   const cellSelect = cellText + " cursor-pointer";
 
-  const totalDe = (p) => (Number(p.metrage) || 0) * (Number(p.prixInitial) || 0);
+  const coutMetre = (p) => (Number(p.prixInitial) || 0) + (Number(p.prixTapage) || 0);
+  const totalDe = (p) => (Number(p.metrage) || 0) * coutMetre(p);
 
   // Nom de l'article une fois teint, tel qu'il entrera dans le stock
   const nomArticle = (p) => {
@@ -2751,6 +2752,7 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
         teinturier: "",
         metrage: "",
         prixInitial: "",
+        prixTapage: "",
         statut: "en_cours",
         enStock: false,
         qteEntree: 0,
@@ -2792,7 +2794,7 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
         id: uid(),
         nom,
         quantite: qte,
-        prixUnitaire: Number(p.prixInitial) || 0,
+        prixUnitaire: coutMetre(p),
         seuilAlerte: 0,
         fournisseurId: "",
       };
@@ -2818,6 +2820,7 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
         { key: "teinturier", label: "Teinturier" },
         { key: "metrage", label: "Métrage (m)" },
         { key: "prixInitial", label: "Prix initial / m (F CFA)" },
+        { key: "prixTapage", label: "Prix tapage / m (F CFA)" },
         { key: "total", label: "Coût total (F CFA)" },
         { key: "statut", label: "Statut" },
         { key: "article", label: "Article en stock" },
@@ -2852,7 +2855,7 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
       </p>
 
       <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
-        <table className="w-full text-sm bz-sans" style={{ minWidth: "1240px" }}>
+        <table className="w-full text-sm bz-sans" style={{ minWidth: "1360px" }}>
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
               <th className="px-3 py-3 w-36">Date</th>
@@ -2861,6 +2864,7 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
               <th className="px-3 py-3">Teinturier</th>
               <th className="px-3 py-3 w-24">Métrage</th>
               <th className="px-3 py-3 w-28">Prix initial / m</th>
+              <th className="px-3 py-3 w-28">Prix tapage / m</th>
               <th className="px-3 py-3 w-28 text-right">Coût total</th>
               <th className="px-3 py-3 w-28">Statut</th>
               <th className="px-3 py-3 w-52">Stock entreprise</th>
@@ -2870,7 +2874,7 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="10" className="px-5 py-6 text-[#9AA0A6]">
+                <td colSpan="11" className="px-5 py-6 text-[#9AA0A6]">
                   {productions.length === 0
                     ? "Aucune teinture. Cliquez sur « + Nouvelle teinture » et remplissez les cases directement, comme dans Excel."
                     : "Aucun résultat pour cette recherche."}
@@ -2910,6 +2914,11 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
                     value={p.prixInitial ?? ""}
                     onChange={(e) => update(p.id, { prixInitial: e.target.value })} />
                 </td>
+                <td className="px-1 py-1">
+                  <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
+                    value={p.prixTapage ?? ""}
+                    onChange={(e) => update(p.id, { prixTapage: e.target.value })} />
+                </td>
                 <td className="px-3 py-1 bz-mono text-right whitespace-nowrap font-medium">{fcfa(totalDe(p))}</td>
                 <td className="px-1 py-1">
                   <select
@@ -2938,8 +2947,9 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
         </table>
       </div>
       <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
-        Le « prix initial » est votre coût de revient par mètre (bazin blanc + teinture). Quand vous cochez « entrer en stock », le métrage est ajouté à un article
-        « {"{qualité}"} teint {"{couleur}"} » dans l'onglet Stock (créé automatiquement s'il n'existe pas encore). Décochez pour annuler l'entrée en stock.
+        Le « prix initial » (bazin blanc + teinture) et le « prix tapage » sont vos coûts par mètre : le coût total = métrage × (prix initial + prix tapage).
+        Quand vous cochez « entrer en stock », le métrage est ajouté à un article « {"{qualité}"} teint {"{couleur}"} » dans l'onglet Stock (créé automatiquement s'il n'existe pas encore),
+        avec ce coût par mètre comme prix de départ. Décochez pour annuler l'entrée en stock.
       </p>
     </div>
   );
