@@ -1300,11 +1300,14 @@ function TeinturesView({ teintures, saveTeintures }) {
     const map = new Map();
     teintures.forEach((t) => {
       const nom = nomDe(t);
-      if (!map.has(nom)) map.set(nom, { nom, nb: 0, enTeinture: 0, total: 0 });
+      if (!map.has(nom)) map.set(nom, { nom, nb: 0, enTeinture: 0, total: 0, aPayer: 0, dejaPaye: 0 });
       const e = map.get(nom);
+      const prix = Number(t.prix) || 0;
       e.nb += 1;
-      e.total += Number(t.prix) || 0;
+      e.total += prix;
       if (t.statut !== "renvoye") e.enTeinture += 1;
+      if (t.regle) e.dejaPaye += prix;
+      else e.aPayer += prix;
     });
     return [...map.values()].sort((a, b) => a.nom.localeCompare(b.nom));
   }, [teintures]);
@@ -1324,10 +1327,30 @@ function TeinturesView({ teintures, saveTeintures }) {
   const addRow = (nomTeinturier) =>
     saveTeintures([
       ...teintures,
-      { id: uid(), date: today(), teinturier: nomTeinturier, lancePar: "", qualite: qualites[0], quantite: "", prix: "", statut: "en_teinture", notes: "" },
+      { id: uid(), date: today(), teinturier: nomTeinturier, lancePar: "", qualite: qualites[0], quantite: "", prix: "", statut: "en_teinture", regle: false, datePaiement: "", notes: "" },
     ]);
 
   const remove = (id) => saveTeintures(teintures.filter((t) => t.id !== id));
+
+  // Payer un teinturier : arrête le compte (marque comme réglé tout ce qui est dû),
+  // un nouveau compte recommence pour les prochains travaux.
+  const payer = (nom) => {
+    const dus = teintures.filter((t) => nomDe(t) === nom && !t.regle && (Number(t.prix) || 0) > 0);
+    const montant = dus.reduce((s, t) => s + (Number(t.prix) || 0), 0);
+    if (montant <= 0) {
+      alert("Rien à payer pour ce teinturier pour le moment.");
+      return;
+    }
+    if (!window.confirm(
+      `Confirmer le paiement de ${fcfa(montant)} à ${nom} ?\n\nLe compte sera arrêté (remis à zéro). Si vous lui redonnez du travail, un nouveau compte recommencera.`
+    )) return;
+    const d = today();
+    saveTeintures(teintures.map((t) =>
+      (nomDe(t) === nom && !t.regle && (Number(t.prix) || 0) > 0)
+        ? { ...t, regle: true, datePaiement: d }
+        : t
+    ));
+  };
 
   const creerTeinturier = (e) => {
     e.preventDefault();
@@ -1342,7 +1365,7 @@ function TeinturesView({ teintures, saveTeintures }) {
   const exportTeintures = (rows, nomFichier) =>
     exportCSV(
       nomFichier,
-      rows.map((t) => ({ ...t, statut: t.statut === "renvoye" ? "Oui" : "Non" })),
+      rows.map((t) => ({ ...t, statut: t.statut === "renvoye" ? "Oui" : "Non", regleTxt: t.regle ? "Oui" : "Non" })),
       [
         { key: "date", label: "Date" },
         { key: "teinturier", label: "Teinturier" },
@@ -1351,6 +1374,8 @@ function TeinturesView({ teintures, saveTeintures }) {
         { key: "quantite", label: "Quantité" },
         { key: "prix", label: "Prix teinture (F CFA)" },
         { key: "statut", label: "Bazin renvoyé" },
+        { key: "regleTxt", label: "Payé" },
+        { key: "datePaiement", label: "Date de paiement" },
         { key: "notes", label: "Notes" },
       ]
     );
@@ -1363,21 +1388,31 @@ function TeinturesView({ teintures, saveTeintures }) {
         total: lignes.filter((t) => t.qualite === q).reduce((s, t) => s + (Number(t.quantite) || 0), 0),
       }))
       .filter((e) => e.total > 0);
+    const aPayerSel = lignes.filter((t) => !t.regle).reduce((s, t) => s + (Number(t.prix) || 0), 0);
+    const dejaPayeSel = lignes.filter((t) => t.regle).reduce((s, t) => s + (Number(t.prix) || 0), 0);
+    const histMap = {};
+    lignes.filter((t) => t.regle && t.datePaiement).forEach((t) => {
+      histMap[t.datePaiement] = (histMap[t.datePaiement] || 0) + (Number(t.prix) || 0);
+    });
+    const historique = Object.entries(histMap).sort(([a], [b]) => (a < b ? 1 : -1));
     return (
       <div>
         <button onClick={() => setSelection(null)}
           className="bz-sans text-sm text-[#1F6F5C] mb-4 hover:underline">
           ← Tous les teinturiers
         </button>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="bz-serif text-3xl font-semibold">{selection}</h1>
             <p className="bz-sans text-[#5B5F55]">
-              {fiche ? `${fiche.nb} ligne(s) · ${fiche.enTeinture} bazin(s) encore en teinture · total : ` : ""}
-              {fiche && <span className="bz-mono">{fcfa(fiche.total)}</span>}
+              {fiche ? `${fiche.nb} ligne(s) · ${fiche.enTeinture} bazin(s) encore en teinture` : ""}
             </p>
           </div>
           <div className="flex gap-2 items-center">
+            <button onClick={() => payer(selection)} disabled={aPayerSel <= 0}
+              className={`bz-sans px-4 py-2 rounded-sm text-sm font-medium ${aPayerSel > 0 ? "bg-[#1B2430] text-white hover:bg-black" : "bg-[#EFEBDF] text-[#9AA0A6] cursor-not-allowed"}`}>
+              J'ai payé — arrêter le compte
+            </button>
             <button onClick={() => exportTeintures(lignes, `bazin-teinture-${selection}.csv`)}
               className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
               Exporter CSV
@@ -1386,6 +1421,33 @@ function TeinturesView({ teintures, saveTeintures }) {
               className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
               + Ajouter une ligne
             </button>
+          </div>
+        </div>
+
+        {/* ---- Compte courant ---- */}
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="bg-white border border-[#C1652F] rounded-sm px-5 py-4">
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Reste à payer (compte en cours)</div>
+            <div className="bz-mono text-2xl font-medium text-[#C1652F]">{fcfa(aPayerSel)}</div>
+          </div>
+          <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Déjà payé (total)</div>
+            <div className="bz-mono text-2xl font-medium text-[#1F6F5C]">{fcfa(dejaPayeSel)}</div>
+          </div>
+          <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Derniers paiements</div>
+            {historique.length === 0 ? (
+              <div className="bz-sans text-sm text-[#9AA0A6]">Aucun paiement enregistré</div>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {historique.slice(0, 3).map(([d, m]) => (
+                  <div key={d} className="bz-sans text-sm flex justify-between">
+                    <span className="text-[#5B5F55]">{fmtDate(d)}</span>
+                    <span className="bz-mono">{fcfa(m)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1413,6 +1475,7 @@ function TeinturesView({ teintures, saveTeintures }) {
                 <th className="px-3 py-3 w-20">Qté</th>
                 <th className="px-3 py-3 w-32">Prix (F CFA)</th>
                 <th className="px-3 py-3 w-32">Renvoyé ?</th>
+                <th className="px-3 py-3 w-36">Règlement</th>
                 <th className="px-3 py-3">Notes</th>
                 <th className="px-3 py-3 w-10"></th>
               </tr>
@@ -1420,14 +1483,14 @@ function TeinturesView({ teintures, saveTeintures }) {
             <tbody>
               {lignes.length === 0 && (
                 <tr>
-                  <td colSpan="8" className="px-5 py-6 text-[#9AA0A6]">
+                  <td colSpan="9" className="px-5 py-6 text-[#9AA0A6]">
                     Aucune ligne. Cliquez sur « + Ajouter une ligne » et remplissez les cases directement, comme dans Excel.
                   </td>
                 </tr>
               )}
               {lignes.map((t) => (
                 <tr key={t.id}
-                  className={`border-b border-[#EFEBDF] last:border-0 ${t.statut === "renvoye" ? "" : "bg-[#FDF8EF]"}`}>
+                  className={`border-b border-[#EFEBDF] last:border-0 ${t.regle ? "bg-[#F2F1EC] text-[#9AA0A6]" : (t.statut === "renvoye" ? "" : "bg-[#FDF8EF]")}`}>
                   <td className="px-1 py-1">
                     <input type="date" className={cellText + " bz-mono"} value={t.date || ""}
                       onChange={(e) => update(t.id, { date: e.target.value })} />
@@ -1461,6 +1524,15 @@ function TeinturesView({ teintures, saveTeintures }) {
                       <option value="renvoye">Oui</option>
                     </select>
                   </td>
+                  <td className="px-3 py-1 text-xs whitespace-nowrap">
+                    {t.regle ? (
+                      <span className="text-[#1F6F5C]">Payé{t.datePaiement ? " le " + fmtDate(t.datePaiement) : ""}</span>
+                    ) : (Number(t.prix) || 0) > 0 ? (
+                      <span className="text-[#C1652F]">À payer</span>
+                    ) : (
+                      <span className="text-[#9AA0A6]">—</span>
+                    )}
+                  </td>
                   <td className="px-1 py-1">
                     <input className={cellText} value={t.notes || ""}
                       onChange={(e) => update(t.id, { notes: e.target.value })} />
@@ -1476,6 +1548,7 @@ function TeinturesView({ teintures, saveTeintures }) {
         </div>
         <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
           Écrivez directement dans les cases : tout est enregistré automatiquement. Les lignes en jaune clair sont les bazins encore en teinture.
+          Quand vous payez le teinturier, cliquez sur « J'ai payé — arrêter le compte » : les lignes dues passent en « Payé » (grisées) et le reste à payer revient à zéro. Les nouveaux travaux repartent sur un nouveau compte.
         </p>
       </div>
     );
@@ -1542,7 +1615,13 @@ function TeinturesView({ teintures, saveTeintures }) {
                   <span className="text-[#1F6F5C]">Tout a été renvoyé</span>
                 )}
               </div>
-              <div className="bz-mono text-sm">{fcfa(t.total)}</div>
+              <div className="bz-sans text-sm">
+                {t.aPayer > 0 ? (
+                  <span className="text-[#C1652F] font-medium">À payer : <span className="bz-mono">{fcfa(t.aPayer)}</span></span>
+                ) : (
+                  <span className="text-[#1F6F5C]">Compte à jour ✓</span>
+                )}
+              </div>
             </button>
           ))}
         </div>
