@@ -15,6 +15,24 @@ const fmtDate = (iso) => {
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
 };
+
+/* Indicatif du pays par défaut, ajouté quand le numéro est saisi sans
+   indicatif (ex. 77 123 45 67 → 221771234567). 221 = Sénégal. */
+const INDICATIF_PAYS = "221";
+const numeroWhatsApp = (tel) => {
+  let d = String(tel || "").replace(/[^\d]/g, "");
+  if (!d) return "";
+  if (!d.startsWith(INDICATIF_PAYS) && d.length <= 9) d = INDICATIF_PAYS + d;
+  return d;
+};
+const ouvrirWhatsApp = (tel, message) => {
+  const num = numeroWhatsApp(tel);
+  if (!num) {
+    alert("Aucun numéro de téléphone enregistré pour ce client.");
+    return;
+  }
+  window.open(`https://wa.me/${num}?text=${encodeURIComponent(message)}`, "_blank");
+};
 const moisLabel = (ym) => {
   const [y, m] = ym.split("-");
   const noms = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
@@ -1648,13 +1666,13 @@ function CommandesView({ commandes, saveCommandes }) {
               <th className="px-3 py-3 w-36">Retrait prévu</th>
               <th className="px-3 py-3 w-24">Retirée ?</th>
               <th className="px-3 py-3 w-36">Jour du retrait</th>
-              <th className="px-3 py-3 w-10"></th>
+              <th className="px-3 py-3 w-32"></th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="13" className="px-5 py-6 text-[#9AA0A6]">
+                <td colSpan="14" className="px-5 py-6 text-[#9AA0A6]">
                   {commandes.length === 0
                     ? "Aucune commande. Cliquez sur « + Nouvelle commande » et remplissez les cases directement, comme dans Excel."
                     : "Aucun résultat pour cette recherche."}
@@ -1729,7 +1747,18 @@ function CommandesView({ commandes, saveCommandes }) {
                     <span className="px-2 text-[#9AA0A6]">—</span>
                   )}
                 </td>
-                <td className="px-1 py-1 text-center">
+                <td className="px-1 py-1 text-right whitespace-nowrap">
+                  {c.statut !== "retiree" && c.telephone && (
+                    <button
+                      onClick={() =>
+                        ouvrirWhatsApp(
+                          c.telephone,
+                          `Bonjour${c.client ? " " + c.client : ""}, votre commande${c.typeCommande ? " (" + c.typeCommande + ")" : ""} est prête. Vous pouvez venir la retirer. Merci !`
+                        )
+                      }
+                      title="Prévenir que la commande est prête sur WhatsApp"
+                      className="text-[#1F6F5C] hover:underline text-xs mr-2">WhatsApp</button>
+                  )}
                   <button onClick={() => remove(c.id)} title="Supprimer la ligne"
                     className="text-[#C1652F] hover:underline text-sm px-2">✕</button>
                 </td>
@@ -1740,6 +1769,7 @@ function CommandesView({ commandes, saveCommandes }) {
       </div>
       <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
         Écrivez directement dans les cases : tout est enregistré automatiquement. Les lignes en jaune clair sont les commandes pas encore retirées.
+        Le bouton WhatsApp ouvre une conversation avec le client (message déjà écrit) pour le prévenir que sa commande est prête.
         Quand vous passez « Retirée ? » à Oui, le jour du retrait se remplit automatiquement avec la date du jour (modifiable).
         La colonne « Qualité donnée » ne s'active que pour les commandes de teinture.
       </p>
@@ -1960,13 +1990,13 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
               <th className="px-3 py-3 w-36">Mode paiement</th>
               <th className="px-3 py-3 w-24">Statut</th>
               <th className="px-3 py-3 w-40">Stock</th>
-              <th className="px-3 py-3 w-16"></th>
+              <th className="px-3 py-3 w-40"></th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="15" className="px-5 py-6 text-[#9AA0A6]">
+                <td colSpan="16" className="px-5 py-6 text-[#9AA0A6]">
                   {ventes.length === 0
                     ? "Aucune vente. Cliquez sur « + Nouvelle vente » et remplissez les cases directement, comme dans Excel."
                     : "Aucune vente ne correspond à ce filtre."}
@@ -2052,6 +2082,17 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
                     )}
                   </td>
                   <td className="px-1 py-1 text-right whitespace-nowrap">
+                    {reste > 0 && v.telephone && (
+                      <button
+                        onClick={() =>
+                          ouvrirWhatsApp(
+                            v.telephone,
+                            `Bonjour${v.client ? " " + v.client : ""}, petit rappel concernant votre achat${v.article ? " de " + v.article : ""} du ${fmtDate(v.date)} d'un montant de ${fcfa(totalDe(v))}. Il reste ${fcfa(reste)} à régler. Merci !`
+                          )
+                        }
+                        title="Rappel de paiement sur WhatsApp"
+                        className="text-[#1F6F5C] hover:underline text-xs mr-2">WhatsApp</button>
+                    )}
                     {st !== "paye" && (
                       <button onClick={() => solder(v.id)} title="Marquer entièrement payé"
                         className="text-[#1F6F5C] hover:underline text-xs mr-2">Soldé</button>
