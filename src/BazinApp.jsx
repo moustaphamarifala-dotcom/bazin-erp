@@ -85,6 +85,7 @@ export default function BazinApp() {
   const [depenses, setDepenses] = useState([]);
   const [teintures, setTeintures] = useState([]);
   const [commandes, setCommandes] = useState([]);
+  const [ventes, setVentes] = useState([]);
 
   /* ---- chargement initial ---- */
   useEffect(() => {
@@ -97,7 +98,7 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d, dep, t, cmd] = await Promise.all([
+      const [c, f, s, d, dep, t, cmd, v] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
@@ -105,6 +106,7 @@ export default function BazinApp() {
         load("bazin:depenses", []),
         load("bazin:teintures", []),
         load("bazin:commandes", []),
+        load("bazin:ventes", []),
       ]);
       setClients(c);
       setFournisseurs(f);
@@ -113,6 +115,7 @@ export default function BazinApp() {
       setDepenses(dep);
       setTeintures(t);
       setCommandes(cmd);
+      setVentes(v);
       setLoading(false);
     })();
   }, []);
@@ -134,6 +137,7 @@ export default function BazinApp() {
   const saveDepenses = (next) => { setDepenses(next); persist("bazin:depenses", next); };
   const saveTeintures = (next) => { setTeintures(next); persist("bazin:teintures", next); };
   const saveCommandes = (next) => { setCommandes(next); persist("bazin:commandes", next); };
+  const saveVentes = (next) => { setVentes(next); persist("bazin:ventes", next); };
 
   /* ---- dérivés ---- */
   const lowStock = stock.filter((s) => Number(s.quantite) <= Number(s.seuilAlerte));
@@ -210,6 +214,7 @@ export default function BazinApp() {
             ["depenses", "Dépenses"],
             ["teintures", "Teinturiers"],
             ["commandes", "Commandes de bazins"],
+            ["ventes", "Ventes"],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -275,6 +280,9 @@ export default function BazinApp() {
         )}
         {tab === "commandes" && (
           <CommandesView commandes={commandes} saveCommandes={saveCommandes} />
+        )}
+        {tab === "ventes" && (
+          <VentesView ventes={ventes} saveVentes={saveVentes} />
         )}
       </main>
     </div>
@@ -1734,6 +1742,260 @@ function CommandesView({ commandes, saveCommandes }) {
         Écrivez directement dans les cases : tout est enregistré automatiquement. Les lignes en jaune clair sont les commandes pas encore retirées.
         Quand vous passez « Retirée ? » à Oui, le jour du retrait se remplit automatiquement avec la date du jour (modifiable).
         La colonne « Qualité donnée » ne s'active que pour les commandes de teinture.
+      </p>
+    </div>
+  );
+}
+
+/* ============================================================ */
+function VentesView({ ventes, saveVentes }) {
+  const [query, setQuery] = useState("");
+  const [filtreStatut, setFiltreStatut] = useState("tous");
+
+  const qualites = [
+    "Vainqueur blanc",
+    "Moins riche blanc",
+    "Riche blanc",
+    "Habillement femme",
+    "Habillement homme",
+    "Bazin teint",
+    "Autre",
+  ];
+
+  const cellText = "w-full bg-transparent px-2 py-1.5 text-sm text-[#1B2430] border border-transparent rounded-sm focus:outline-none focus:border-[#1F6F5C] focus:bg-white";
+  const cellSelect = cellText + " cursor-pointer";
+
+  const totalDe = (v) => (Number(v.metrage) || 0) * (Number(v.prixMetre) || 0);
+  const resteDe = (v) => Math.max(0, totalDe(v) - (Number(v.montantPaye) || 0));
+  const statutDe = (v) => {
+    const total = totalDe(v);
+    const paye = Number(v.montantPaye) || 0;
+    if (total > 0 && paye >= total) return "paye";
+    if (paye > 0) return "partiel";
+    return "credit";
+  };
+  const statutInfo = {
+    paye: { label: "Payé", tone: "ink" },
+    partiel: { label: "Partiel", tone: "gold" },
+    credit: { label: "Crédit", tone: "fade" },
+  };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return ventes.filter((v) => {
+      if (filtreStatut !== "tous" && statutDe(v) !== filtreStatut) return false;
+      if (!q) return true;
+      return [v.client, v.telephone, v.article, v.qualite, v.notes]
+        .some((x) => (x || "").toLowerCase().includes(q));
+    });
+  }, [ventes, query, filtreStatut]);
+
+  const totalVentes = filtered.reduce((s, v) => s + totalDe(v), 0);
+  const totalEncaisse = filtered.reduce((s, v) => s + (Number(v.montantPaye) || 0), 0);
+  const totalReste = filtered.reduce((s, v) => s + resteDe(v), 0);
+
+  const update = (id, patch) =>
+    saveVentes(ventes.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+
+  const addRow = () =>
+    saveVentes([
+      ...ventes,
+      {
+        id: uid(),
+        date: today(),
+        client: "",
+        telephone: "",
+        article: "",
+        qualite: qualites[0],
+        metrage: "",
+        prixMetre: "",
+        montantPaye: "",
+        notes: "",
+      },
+    ]);
+
+  const solder = (id) => {
+    const v = ventes.find((x) => x.id === id);
+    if (v) update(id, { montantPaye: totalDe(v) });
+  };
+
+  const remove = (id) => saveVentes(ventes.filter((v) => v.id !== id));
+
+  const exportVentes = () =>
+    exportCSV(
+      "bazin-ventes.csv",
+      ventes.map((v) => ({
+        ...v,
+        total: totalDe(v),
+        reste: resteDe(v),
+        statut: statutInfo[statutDe(v)].label,
+      })),
+      [
+        { key: "date", label: "Date" },
+        { key: "client", label: "Client" },
+        { key: "telephone", label: "Numéro" },
+        { key: "article", label: "Article vendu" },
+        { key: "qualite", label: "Qualité" },
+        { key: "metrage", label: "Métrage (m)" },
+        { key: "prixMetre", label: "Prix par métrage (F CFA)" },
+        { key: "total", label: "Total (F CFA)" },
+        { key: "montantPaye", label: "Montant payé (F CFA)" },
+        { key: "reste", label: "Reste à payer (F CFA)" },
+        { key: "statut", label: "Statut" },
+        { key: "notes", label: "Notes" },
+      ]
+    );
+
+  const filtres = [
+    ["tous", "Toutes"],
+    ["credit", "Crédit"],
+    ["partiel", "Partiel"],
+    ["paye", "Payé"],
+  ];
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="bz-serif text-3xl font-semibold">Ventes</h1>
+          <p className="bz-sans text-[#5B5F55]">{ventes.length} vente(s) enregistrée(s)</p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <SearchBox value={query} onChange={setQuery} placeholder="Rechercher une vente…" />
+          <button onClick={exportVentes}
+            className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
+            Exporter CSV
+          </button>
+          <button onClick={addRow}
+            className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+            + Nouvelle vente
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4 mb-5">
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Total des ventes</div>
+          <div className="bz-mono text-2xl font-medium">{fcfa(totalVentes)}</div>
+        </div>
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Encaissé</div>
+          <div className="bz-mono text-2xl font-medium text-[#1F6F5C]">{fcfa(totalEncaisse)}</div>
+        </div>
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Reste à encaisser (crédit)</div>
+          <div className="bz-mono text-2xl font-medium text-[#C1652F]">{fcfa(totalReste)}</div>
+        </div>
+      </div>
+
+      <div className="flex gap-2 mb-4">
+        {filtres.map(([key, label]) => (
+          <button key={key} onClick={() => setFiltreStatut(key)}
+            className={`bz-sans text-sm px-3 py-1.5 rounded-sm border transition-colors ${
+              filtreStatut === key
+                ? "bg-[#1B2430] text-white border-[#1B2430]"
+                : "bg-white border-[#D8D2C2] text-[#5B5F55] hover:bg-[#FBF9F4]"
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
+        <table className="w-full text-sm bz-sans" style={{ minWidth: "1360px" }}>
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+              <th className="px-3 py-3 w-36">Date</th>
+              <th className="px-3 py-3">Client</th>
+              <th className="px-3 py-3 w-32">Numéro</th>
+              <th className="px-3 py-3">Article vendu</th>
+              <th className="px-3 py-3 w-44">Qualité</th>
+              <th className="px-3 py-3 w-24">Métrage</th>
+              <th className="px-3 py-3 w-28">Prix / m</th>
+              <th className="px-3 py-3 w-28 text-right">Total</th>
+              <th className="px-3 py-3 w-32">Payé</th>
+              <th className="px-3 py-3 w-28 text-right">Reste</th>
+              <th className="px-3 py-3 w-28">Statut</th>
+              <th className="px-3 py-3 w-16"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan="12" className="px-5 py-6 text-[#9AA0A6]">
+                  {ventes.length === 0
+                    ? "Aucune vente. Cliquez sur « + Nouvelle vente » et remplissez les cases directement, comme dans Excel."
+                    : "Aucune vente ne correspond à ce filtre."}
+                </td>
+              </tr>
+            )}
+            {filtered.map((v) => {
+              const st = statutDe(v);
+              const reste = resteDe(v);
+              return (
+                <tr key={v.id}
+                  className={`border-b border-[#EFEBDF] last:border-0 ${st === "paye" ? "" : "bg-[#FDF8EF]"}`}>
+                  <td className="px-1 py-1">
+                    <input type="date" className={cellText + " bz-mono"} value={v.date || ""}
+                      onChange={(e) => update(v.id, { date: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <input className={cellText + " font-medium"} placeholder="Nom du client" value={v.client || ""}
+                      onChange={(e) => update(v.id, { client: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <input className={cellText + " bz-mono"} placeholder="Téléphone" value={v.telephone || ""}
+                      onChange={(e) => update(v.id, { telephone: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <input className={cellText} placeholder="Ce qui est vendu" value={v.article || ""}
+                      onChange={(e) => update(v.id, { article: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <select className={cellSelect} value={v.qualite || qualites[0]}
+                      onChange={(e) => update(v.id, { qualite: e.target.value })}>
+                      {qualites.map((q) => <option key={q} value={q}>{q}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-1 py-1">
+                    <input type="number" min="0" step="0.5" className={cellText + " bz-mono text-right"} placeholder="0"
+                      value={v.metrage ?? ""}
+                      onChange={(e) => update(v.id, { metrage: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
+                    <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
+                      value={v.prixMetre ?? ""}
+                      onChange={(e) => update(v.id, { prixMetre: e.target.value })} />
+                  </td>
+                  <td className="px-3 py-1 bz-mono text-right whitespace-nowrap font-medium">{fcfa(totalDe(v))}</td>
+                  <td className="px-1 py-1">
+                    <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
+                      value={v.montantPaye ?? ""}
+                      onChange={(e) => update(v.id, { montantPaye: e.target.value })} />
+                  </td>
+                  <td className={`px-3 py-1 bz-mono text-right whitespace-nowrap ${reste > 0 ? "text-[#C1652F] font-medium" : "text-[#9AA0A6]"}`}>
+                    {fcfa(reste)}
+                  </td>
+                  <td className="px-2 py-1 whitespace-nowrap">
+                    <Tampon label={statutInfo[st].label} tone={statutInfo[st].tone} />
+                  </td>
+                  <td className="px-1 py-1 text-right whitespace-nowrap">
+                    {st !== "paye" && (
+                      <button onClick={() => solder(v.id)} title="Marquer entièrement payé"
+                        className="text-[#1F6F5C] hover:underline text-xs mr-2">Soldé</button>
+                    )}
+                    <button onClick={() => remove(v.id)} title="Supprimer la ligne"
+                      className="text-[#C1652F] hover:underline text-sm">✕</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
+        Écrivez directement dans les cases : tout est enregistré automatiquement. Le total et le reste à payer se calculent tout seuls.
+        Les lignes en jaune clair sont les ventes pas encore entièrement payées. « Soldé » indique que le client a tout réglé.
       </p>
     </div>
   );
