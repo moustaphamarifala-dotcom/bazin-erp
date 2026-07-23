@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
 /* ---------- Utilitaires ---------- */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -38,6 +38,15 @@ const moisLabel = (ym) => {
   const noms = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
   return `${noms[Number(m) - 1]} ${y.slice(2)}`;
 };
+/* ---------- Calculs partagés (ventes, production, mois) ---------- */
+const nbr = (x) => Number(x) || 0;
+const venteArticles = (v) => nbr(v.metrage) * nbr(v.prixMetre);
+const venteTotal = (v) => venteArticles(v) + nbr(v.transport);
+const venteReste = (v) => Math.max(0, venteTotal(v) - nbr(v.montantPaye));
+const productionCout = (p) => nbr(p.metrage) * (nbr(p.prixInitial) + nbr(p.prixTapage));
+const dansMois = (dateStr, ym) => (dateStr || "").slice(0, 7) === ym;
+const moisCourant = () => today().slice(0, 7);
+
 function exportCSV(filename, rows, headers) {
   const escape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const csv = [headers.map((h) => h.label).join(";"), ...rows.map((r) => headers.map((h) => escape(r[h.key])).join(";"))].join("\n");
@@ -233,6 +242,7 @@ export default function BazinApp() {
         <nav className="flex-1 px-3 py-4 flex flex-col gap-1">
           {[
             ["dashboard", "Tableau de bord"],
+            ["bilan", "Bilan & bénéfice"],
             ["caisse", "Caisse"],
             ["rappels", "Rappels WhatsApp"],
             ["clients", "Clients"],
@@ -275,16 +285,27 @@ export default function BazinApp() {
           <Dashboard
             clients={clients}
             stock={stock}
-            docs={docs}
             lowStock={lowStock}
-            totalDu={totalDu}
-            docLignesTotal={docLignesTotal}
-            enRetard={enRetard}
-            relancer={relancer}
+            ventes={ventes}
+            caisse={caisse}
+            teintures={teintures}
+            commandes={commandes}
+            depenses={depenses}
+            productions={productions}
+            setTab={setTab}
+          />
+        )}
+        {tab === "bilan" && (
+          <BilanView
+            ventes={ventes}
+            caisse={caisse}
+            depenses={depenses}
+            teintures={teintures}
+            productions={productions}
           />
         )}
         {tab === "clients" && (
-          <ClientsView clients={clients} saveClients={saveClients} docs={docs} />
+          <ClientsView clients={clients} saveClients={saveClients} docs={docs} ventes={ventes} commandes={commandes} />
         )}
         {tab === "fournisseurs" && (
           <FournisseursView fournisseurs={fournisseurs} saveFournisseurs={saveFournisseurs} stock={stock} />
@@ -396,138 +417,157 @@ function PrintView({ doc, clients, onClose }) {
 }
 
 
-function Dashboard({ clients, stock, docs, lowStock, totalDu, docLignesTotal, enRetard, relancer }) {
-  const stats = [
-    ["Clients", clients.length],
-    ["Articles en stock", stock.length],
-    ["Devis & factures", docs.length],
-    ["Reste à encaisser", fcfa(totalDu)],
+function Dashboard({ clients, stock, lowStock, ventes, caisse, teintures, commandes, depenses, productions, setTab }) {
+  const jour = today();
+  const ym = moisCourant();
+  const d30 = new Date();
+  d30.setDate(d30.getDate() - 30);
+  const seuil30 = d30.toISOString().slice(0, 10);
+
+  const ventesJour = ventes.filter((v) => v.date === jour).reduce((s, v) => s + venteTotal(v), 0);
+  const caisseJour = caisse.filter((t) => (t.dateTime || "").slice(0, 10) === jour).reduce((s, t) => s + ticketTotal(t), 0);
+  const credits = ventes.reduce((s, v) => s + venteReste(v), 0);
+  const aPayerTeint = teintures.reduce((s, t) => s + (t.regle ? 0 : nbr(t.prix)), 0);
+  const cmdARetirer = commandes.filter((c) => c.statut !== "retiree");
+
+  const revMois =
+    ventes.filter((v) => dansMois(v.date, ym)).reduce((s, v) => s + venteTotal(v), 0) +
+    caisse.filter((t) => dansMois((t.dateTime || "").slice(0, 10), ym)).reduce((s, t) => s + ticketTotal(t), 0);
+  const depMois =
+    depenses.filter((d) => dansMois(d.date, ym)).reduce((s, d) => s + nbr(d.montant), 0) +
+    teintures.filter((t) => t.regle && dansMois(t.datePaiement, ym)).reduce((s, t) => s + nbr(t.prix), 0) +
+    productions.filter((p) => dansMois(p.date, ym)).reduce((s, p) => s + productionCout(p), 0);
+  const benefMois = revMois - depMois;
+
+  const entreesParMois = useMemo(() => {
+    const map = {};
+    ventes.forEach((v) => { if (v.date) map[v.date.slice(0, 7)] = (map[v.date.slice(0, 7)] || 0) + venteTotal(v); });
+    caisse.forEach((t) => { const k = (t.dateTime || "").slice(0, 7); if (k) map[k] = (map[k] || 0) + ticketTotal(t); });
+    return Object.entries(map).sort(([a], [b]) => (a < b ? -1 : 1)).slice(-6).map(([mois, total]) => ({ mois: moisLabel(mois), total }));
+  }, [ventes, caisse]);
+
+  // Alertes "à faire aujourd'hui"
+  const cmdUrgent = cmdARetirer.filter((c) => c.dateRetrait && c.dateRetrait <= jour);
+  const creditsAnciens = ventes.filter((v) => venteReste(v) > 0 && v.date && v.date < seuil30);
+  const teintTot = {};
+  teintures.forEach((t) => { if (!t.regle && nbr(t.prix) > 0) { const n = (t.teinturier || "").trim() || "Sans nom"; teintTot[n] = (teintTot[n] || 0) + nbr(t.prix); } });
+  const teinturiersAPayer = Object.entries(teintTot);
+
+  const cards = [
+    ["Ventes du jour", fcfa(ventesJour), "ventes", "#1B2430"],
+    ["Caisse du jour", fcfa(caisseJour), "caisse", "#1F6F5C"],
+    ["Reste à encaisser (crédits)", fcfa(credits), "rappels", "#C1652F"],
+    ["À payer aux teinturiers", fcfa(aPayerTeint), "teintures", "#C1652F"],
+    ["Commandes à retirer", String(cmdARetirer.length), "commandes", "#1B2430"],
+    ["Bénéfice ce mois", fcfa(benefMois), "bilan", benefMois >= 0 ? "#1F6F5C" : "#C1652F"],
   ];
 
-  const revenueByMonth = useMemo(() => {
-    const map = {};
-    docs
-      .filter((d) => d.type === "facture" && d.statut === "payee")
-      .forEach((d) => {
-        const key = d.date.slice(0, 7);
-        map[key] = (map[key] || 0) + docLignesTotal(d);
-      });
-    return Object.entries(map)
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-      .slice(-6)
-      .map(([mois, total]) => ({ mois: moisLabel(mois), total }));
-  }, [docs, docLignesTotal]);
+  const rien = cmdUrgent.length === 0 && creditsAnciens.length === 0 && teinturiersAPayer.length === 0 && lowStock.length === 0;
 
   return (
     <div>
       <h1 className="bz-serif text-3xl font-semibold mb-1">Tableau de bord</h1>
-      <p className="bz-sans text-[#5B5F55] mb-8">Vue d'ensemble de l'activité de Bazin.</p>
+      <p className="bz-sans text-[#5B5F55] mb-8">Vue d'ensemble de l'activité de Bazin — {fmtDate(jour)}.</p>
 
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        {stats.map(([label, value]) => (
-          <div key={label} className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
-            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">
-              {label}
-            </div>
-            <div className="bz-mono text-2xl font-medium">{value}</div>
-          </div>
+      <div className="grid grid-cols-3 gap-4 mb-8">
+        {cards.map(([label, value, dest, couleur]) => (
+          <button key={label} onClick={() => setTab(dest)}
+            className="text-left bg-white border border-[#D8D2C2] rounded-sm px-5 py-4 hover:border-[#1F6F5C] transition-colors">
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">{label}</div>
+            <div className="bz-mono text-2xl font-medium" style={{ color: couleur }}>{value}</div>
+          </button>
         ))}
       </div>
 
-      {revenueByMonth.length > 0 && (
-        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-8">
-          <h2 className="bz-serif text-lg font-semibold mb-4">Chiffre d'affaires encaissé (6 derniers mois)</h2>
+      {/* ---- À faire aujourd'hui ---- */}
+      <div className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-8">
+        <h2 className="bz-serif text-lg font-semibold mb-3">À faire aujourd'hui</h2>
+        {rien ? (
+          <p className="bz-sans text-sm text-[#1F6F5C]">Rien d'urgent pour le moment. 👍</p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {cmdUrgent.length > 0 && (
+              <div>
+                <div className="bz-sans text-sm font-medium text-[#8A3F14] mb-1">Commandes à retirer ({cmdUrgent.length})</div>
+                <ul className="flex flex-col gap-1">
+                  {cmdUrgent.slice(0, 6).map((c) => (
+                    <li key={c.id} className="bz-sans text-sm flex justify-between">
+                      <span>{c.client || "Client"} — {c.typeCommande || "commande"}<span className="text-[#9AA0A6]"> · prévu {fmtDate(c.dateRetrait)}</span></span>
+                      <button onClick={() => setTab("commandes")} className="text-[#1F6F5C] hover:underline">Voir</button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {creditsAnciens.length > 0 && (
+              <div>
+                <div className="bz-sans text-sm font-medium text-[#8A3F14] mb-1">Crédits de plus de 30 jours ({creditsAnciens.length})</div>
+                <ul className="flex flex-col gap-1">
+                  {creditsAnciens.slice(0, 6).map((v) => (
+                    <li key={v.id} className="bz-sans text-sm flex justify-between">
+                      <span>{v.client || "Client"}<span className="text-[#9AA0A6]"> · depuis le {fmtDate(v.date)}</span></span>
+                      <span className="flex gap-3"><span className="bz-mono text-[#C1652F]">{fcfa(venteReste(v))}</span>
+                        <button onClick={() => setTab("rappels")} className="text-[#1F6F5C] hover:underline">Relancer</button></span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {teinturiersAPayer.length > 0 && (
+              <div>
+                <div className="bz-sans text-sm font-medium text-[#8A3F14] mb-1">Teinturiers à payer ({teinturiersAPayer.length})</div>
+                <ul className="flex flex-col gap-1">
+                  {teinturiersAPayer.slice(0, 6).map(([nom, montant]) => (
+                    <li key={nom} className="bz-sans text-sm flex justify-between">
+                      <span>{nom}</span>
+                      <span className="flex gap-3"><span className="bz-mono text-[#C1652F]">{fcfa(montant)}</span>
+                        <button onClick={() => setTab("teintures")} className="text-[#1F6F5C] hover:underline">Voir</button></span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {lowStock.length > 0 && (
+              <div>
+                <div className="bz-sans text-sm font-medium text-[#8A3F14] mb-1">Stock bas ({lowStock.length})</div>
+                <ul className="flex flex-col gap-1">
+                  {lowStock.slice(0, 6).map((s) => (
+                    <li key={s.id} className="bz-sans text-sm flex justify-between">
+                      <span>{s.nom}</span>
+                      <span className="bz-mono text-[#C1652F]">{s.quantite} / seuil {s.seuilAlerte}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {entreesParMois.length > 0 && (
+        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
+          <h2 className="bz-serif text-lg font-semibold mb-4">Entrées d'argent (6 derniers mois)</h2>
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={revenueByMonth}>
+            <BarChart data={entreesParMois}>
               <CartesianGrid strokeDasharray="3 3" stroke="#EFEBDF" />
               <XAxis dataKey="mois" tick={{ fontSize: 12, fontFamily: "Inter" }} stroke="#9AA0A6" />
-              <YAxis tick={{ fontSize: 12, fontFamily: "Inter" }} stroke="#9AA0A6" width={70}
-                tickFormatter={(v) => fcfa(v)} />
+              <YAxis tick={{ fontSize: 12, fontFamily: "Inter" }} stroke="#9AA0A6" width={70} tickFormatter={(v) => fcfa(v)} />
               <Tooltip formatter={(v) => fcfa(v)} contentStyle={{ fontFamily: "Inter", fontSize: 13 }} />
               <Bar dataKey="total" fill="#1F6F5C" radius={[2, 2, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       )}
-
-      {enRetard.length > 0 && (
-        <div className="bg-white border border-[#C1652F] rounded-sm p-5 mb-8">
-          <h2 className="bz-serif text-lg font-semibold mb-3 text-[#8A3F14]">
-            Factures en retard — {enRetard.length}
-          </h2>
-          <ul className="flex flex-col gap-2">
-            {enRetard.map((d) => (
-              <li key={d.id} className="flex items-center justify-between text-sm bz-sans">
-                <span>
-                  {d.numero} — {clients.find((c) => c.id === d.clientId)?.nom || "Client supprimé"}
-                  <span className="text-[#9AA0A6]"> · échéance {fmtDate(d.echeance)}</span>
-                  {d.relanceCount > 0 && (
-                    <span className="text-[#9AA0A6]"> · {d.relanceCount} relance(s), dernière le {fmtDate(d.derniereRelance)}</span>
-                  )}
-                </span>
-                <span className="flex items-center gap-3">
-                  <span className="bz-mono">{fcfa(docLignesTotal(d))}</span>
-                  <button onClick={() => relancer(d)} className="text-[#1F6F5C] hover:underline whitespace-nowrap">
-                    Relancer
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-6">
-        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
-          <h2 className="bz-serif text-lg font-semibold mb-3">Stock à surveiller</h2>
-          {lowStock.length === 0 ? (
-            <p className="bz-sans text-sm text-[#9AA0A6]">
-              Aucun article sous le seuil d'alerte.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {lowStock.map((s) => (
-                <li key={s.id} className="flex justify-between text-sm bz-sans">
-                  <span>{s.nom}</span>
-                  <span className="bz-mono text-[#C1652F]">
-                    {s.quantite} / seuil {s.seuilAlerte}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
-          <h2 className="bz-serif text-lg font-semibold mb-3">Dernières factures & devis</h2>
-          {docs.length === 0 ? (
-            <p className="bz-sans text-sm text-[#9AA0A6]">Aucun document pour l'instant.</p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {[...docs]
-                .sort((a, b) => (a.date < b.date ? 1 : -1))
-                .slice(0, 5)
-                .map((d) => (
-                  <li key={d.id} className="flex justify-between text-sm bz-sans">
-                    <span>
-                      {d.numero} — {clients.find((c) => c.id === d.clientId)?.nom || "Client supprimé"}
-                    </span>
-                    <span className="bz-mono">{fcfa(docLignesTotal(d))}</span>
-                  </li>
-                ))}
-            </ul>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
 
 /* ============================================================ */
-function ClientsView({ clients, saveClients, docs }) {
+function ClientsView({ clients, saveClients, docs, ventes = [], commandes = [] }) {
   const [editing, setEditing] = useState(null); // objet client ou null
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState("");
+  const [fiche, setFiche] = useState(null); // client dont on affiche l'historique
   const empty = { id: "", nom: "", contact: "", telephone: "", email: "", adresse: "", notes: "" };
 
   const filtered = useMemo(() => {
@@ -651,6 +691,7 @@ function ClientsView({ clients, saveClients, docs }) {
                   <td className="px-5 py-3 bz-mono">{c.telephone}</td>
                   <td className="px-5 py-3">{c.email}</td>
                   <td className="px-5 py-3 text-right whitespace-nowrap">
+                    <button onClick={() => setFiche(c)} className="text-[#1B2430] mr-3 hover:underline">Fiche</button>
                     <button onClick={() => openEdit(c)} className="text-[#1F6F5C] mr-3 hover:underline">Modifier</button>
                     <button onClick={() => remove(c.id)} className="text-[#C1652F] hover:underline">Supprimer</button>
                   </td>
@@ -658,6 +699,92 @@ function ClientsView({ clients, saveClients, docs }) {
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      {fiche && (
+        <FicheClient client={fiche} ventes={ventes} commandes={commandes} onClose={() => setFiche(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ---------- Fiche client : tout son historique ---------- */
+function FicheClient({ client, ventes, commandes, onClose }) {
+  const memeNom = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
+  const sesVentes = ventes.filter((v) => memeNom(v.client, client.nom));
+  const sesCommandes = commandes.filter((c) => memeNom(c.client, client.nom));
+  const totalAchat = sesVentes.reduce((s, v) => s + venteTotal(v), 0);
+  const totalDu = sesVentes.reduce((s, v) => s + venteReste(v), 0);
+  const cmdTotal = (c) => nbr(c.metrage) * nbr(c.prixMetre);
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center overflow-y-auto py-10" onClick={onClose}>
+      <div className="bg-white w-[720px] max-w-[92vw] rounded-sm p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h2 className="bz-serif text-2xl font-semibold">{client.nom}</h2>
+            <div className="bz-sans text-sm text-[#5B5F55]">
+              {[client.contact, client.telephone, client.email, client.adresse].filter(Boolean).join(" · ")}
+            </div>
+          </div>
+          <button onClick={onClose} className="bz-sans text-sm border border-[#D8D2C2] rounded-sm px-3 py-1.5">Fermer</button>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          <div className="bg-[#FBF9F4] border border-[#D8D2C2] rounded-sm px-4 py-3">
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6]">Total acheté</div>
+            <div className="bz-mono text-xl font-medium">{fcfa(totalAchat)}</div>
+          </div>
+          <div className="bg-[#FBF9F4] border border-[#D8D2C2] rounded-sm px-4 py-3">
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6]">Reste à payer</div>
+            <div className="bz-mono text-xl font-medium text-[#C1652F]">{fcfa(totalDu)}</div>
+          </div>
+          <div className="bg-[#FBF9F4] border border-[#D8D2C2] rounded-sm px-4 py-3">
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6]">Achats / commandes</div>
+            <div className="bz-mono text-xl font-medium">{sesVentes.length} / {sesCommandes.length}</div>
+          </div>
+        </div>
+
+        {totalDu > 0 && client.telephone && (
+          <button
+            onClick={() => ouvrirWhatsApp(client.telephone, `Bonjour ${client.nom}, petit rappel : il reste ${fcfa(totalDu)} à régler sur vos achats. Merci !`)}
+            className="bz-sans bg-[#25D366] text-white px-4 py-2 rounded-sm text-sm font-medium mb-5">
+            Rappeler le crédit sur WhatsApp
+          </button>
+        )}
+
+        <h3 className="bz-serif text-lg font-semibold mb-2">Achats</h3>
+        {sesVentes.length === 0 ? (
+          <p className="bz-sans text-sm text-[#9AA0A6] mb-5">Aucun achat enregistré à ce nom.</p>
+        ) : (
+          <div className="mb-5 flex flex-col gap-1">
+            {[...sesVentes].sort((a, b) => (a.date < b.date ? 1 : -1)).map((v) => (
+              <div key={v.id} className="flex justify-between text-sm bz-sans border-b border-[#EFEBDF] py-1.5">
+                <span>{fmtDate(v.date)} — {v.article || v.qualite || "Vente"}</span>
+                <span className="flex gap-3">
+                  <span className="bz-mono">{fcfa(venteTotal(v))}</span>
+                  {venteReste(v) > 0 && <span className="bz-mono text-[#C1652F]">reste {fcfa(venteReste(v))}</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <h3 className="bz-serif text-lg font-semibold mb-2">Commandes</h3>
+        {sesCommandes.length === 0 ? (
+          <p className="bz-sans text-sm text-[#9AA0A6]">Aucune commande enregistrée à ce nom.</p>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {[...sesCommandes].sort((a, b) => (a.date < b.date ? 1 : -1)).map((c) => (
+              <div key={c.id} className="flex justify-between text-sm bz-sans border-b border-[#EFEBDF] py-1.5">
+                <span>{fmtDate(c.date)} — {c.typeCommande || "Commande"}
+                  <span className={c.statut === "retiree" ? "text-[#1F6F5C]" : "text-[#B9832F]"}> · {c.statut === "retiree" ? "retirée" : "à retirer"}</span>
+                </span>
+                <span className="bz-mono">{fcfa(cmdTotal(c))}</span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -1896,6 +2023,13 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
   const cellSelect = cellText + " cursor-pointer";
 
   const articlesDe = (v) => (Number(v.metrage) || 0) * (Number(v.prixMetre) || 0);
+  // Bénéfice = prix de vente des articles − coût (prix de l'article dans le stock).
+  // Connu seulement si la vente est liée à un article du stock.
+  const beneficeDe = (v) => {
+    const item = stock.find((s) => s.id === v.stockId);
+    if (!item) return null;
+    return articlesDe(v) - (Number(item.prixUnitaire) || 0) * (Number(v.metrage) || 0);
+  };
   const totalDe = (v) => articlesDe(v) + (Number(v.transport) || 0);
   const resteDe = (v) => Math.max(0, totalDe(v) - (Number(v.montantPaye) || 0));
   const statutDe = (v) => {
@@ -2075,7 +2209,7 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
       </div>
 
       <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
-        <table className="w-full text-sm bz-sans" style={{ minWidth: "1800px" }}>
+        <table className="w-full text-sm bz-sans" style={{ minWidth: "1920px" }}>
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
               <th className="px-3 py-3 w-36">Date</th>
@@ -2088,6 +2222,7 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
               <th className="px-3 py-3 w-24">Prix / m</th>
               <th className="px-3 py-3 w-24">Transport</th>
               <th className="px-3 py-3 w-28 text-right">Total</th>
+              <th className="px-3 py-3 w-28 text-right">Bénéfice</th>
               <th className="px-3 py-3 w-28">Payé</th>
               <th className="px-3 py-3 w-28 text-right">Reste</th>
               <th className="px-3 py-3 w-36">Mode paiement</th>
@@ -2099,7 +2234,7 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="17" className="px-5 py-6 text-[#9AA0A6]">
+                <td colSpan="18" className="px-5 py-6 text-[#9AA0A6]">
                   {ventes.length === 0
                     ? "Aucune vente. Cliquez sur « + Nouvelle vente » et remplissez les cases directement, comme dans Excel."
                     : "Aucune vente ne correspond à ce filtre."}
@@ -2159,6 +2294,11 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
                       onChange={(e) => update(v.id, { transport: e.target.value })} />
                   </td>
                   <td className="px-3 py-1 bz-mono text-right whitespace-nowrap font-medium">{fcfa(totalDe(v))}</td>
+                  <td className="px-3 py-1 bz-mono text-right whitespace-nowrap">
+                    {beneficeDe(v) === null
+                      ? <span className="text-[#9AA0A6]">—</span>
+                      : <span className={beneficeDe(v) >= 0 ? "text-[#1F6F5C]" : "text-[#C1652F]"}>{fcfa(beneficeDe(v))}</span>}
+                  </td>
                   <td className="px-1 py-1">
                     <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
                       value={v.montantPaye ?? ""}
@@ -2951,6 +3091,123 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
         Quand vous cochez « entrer en stock », le métrage est ajouté à un article « {"{qualité}"} teint {"{couleur}"} » dans l'onglet Stock (créé automatiquement s'il n'existe pas encore),
         avec ce coût par mètre comme prix de départ. Décochez pour annuler l'entrée en stock.
       </p>
+    </div>
+  );
+}
+
+/* ============================================================ */
+function BilanView({ ventes, caisse, depenses, teintures, productions }) {
+  const [mois, setMois] = useState(moisCourant());
+
+  const beneficeDetail = (ym) => {
+    const rVentes = ventes.filter((v) => dansMois(v.date, ym)).reduce((s, v) => s + venteTotal(v), 0);
+    const rCaisse = caisse.filter((t) => dansMois((t.dateTime || "").slice(0, 10), ym)).reduce((s, t) => s + ticketTotal(t), 0);
+    const dDepenses = depenses.filter((d) => dansMois(d.date, ym)).reduce((s, d) => s + nbr(d.montant), 0);
+    const dTeint = teintures.filter((t) => t.regle && dansMois(t.datePaiement, ym)).reduce((s, t) => s + nbr(t.prix), 0);
+    const dProd = productions.filter((p) => dansMois(p.date, ym)).reduce((s, p) => s + productionCout(p), 0);
+    const revenus = rVentes + rCaisse;
+    const charges = dDepenses + dTeint + dProd;
+    return { rVentes, rCaisse, revenus, dDepenses, dTeint, dProd, charges, benefice: revenus - charges };
+  };
+
+  const b = beneficeDetail(mois);
+  const encaisseVentes = ventes.filter((v) => dansMois(v.date, mois)).reduce((s, v) => s + nbr(v.montantPaye), 0);
+  const resteVentes = ventes.filter((v) => dansMois(v.date, mois)).reduce((s, v) => s + venteReste(v), 0);
+
+  const graph = useMemo(() => {
+    const base = new Date(mois + "-01T00:00:00");
+    const arr = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(base);
+      d.setMonth(d.getMonth() - i);
+      const ym = d.toISOString().slice(0, 7);
+      arr.push({ mois: moisLabel(ym), benefice: beneficeDetail(ym).benefice });
+    }
+    return arr;
+  }, [mois, ventes, caisse, depenses, teintures, productions]);
+
+  const ligne = (label, valeur, fort) => (
+    <div className={`flex justify-between py-1.5 ${fort ? "border-t border-[#D8D2C2] mt-1 pt-2 font-semibold" : ""}`}>
+      <span className="bz-sans text-sm text-[#5B5F55]">{label}</span>
+      <span className="bz-mono text-sm">{fcfa(valeur)}</span>
+    </div>
+  );
+
+  const exporter = () =>
+    exportCSV(
+      `bazin-bilan-${mois}.csv`,
+      [
+        { poste: "Ventes", montant: b.rVentes },
+        { poste: "Caisse", montant: b.rCaisse },
+        { poste: "TOTAL REVENUS", montant: b.revenus },
+        { poste: "Dépenses diverses", montant: b.dDepenses },
+        { poste: "Paiements teinturiers", montant: b.dTeint },
+        { poste: "Production (teinture entreprise)", montant: b.dProd },
+        { poste: "TOTAL DÉPENSES", montant: b.charges },
+        { poste: "BÉNÉFICE", montant: b.benefice },
+      ],
+      [{ key: "poste", label: "Poste" }, { key: "montant", label: "Montant (F CFA)" }]
+    );
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="bz-serif text-3xl font-semibold">Bilan & bénéfice</h1>
+          <p className="bz-sans text-[#5B5F55]">Est-ce que le mois a été bon ? Revenus moins dépenses.</p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <input type="month" className={inputCls + " bz-mono"} value={mois} onChange={(e) => setMois(e.target.value)} />
+          <button onClick={exporter} className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
+            Exporter CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Bénéfice en grand */}
+      <div className={`rounded-sm p-6 mb-6 text-white ${b.benefice >= 0 ? "bg-[#1F6F5C]" : "bg-[#C1652F]"}`}>
+        <div className="bz-sans text-sm uppercase tracking-wide opacity-90 mb-1">Bénéfice du mois</div>
+        <div className="bz-mono text-4xl font-semibold">{fcfa(b.benefice)}</div>
+        <div className="bz-sans text-sm opacity-90 mt-1">
+          {b.benefice >= 0 ? "Vous avez gagné de l'argent ce mois-ci." : "Attention : les dépenses dépassent les revenus ce mois-ci."}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-6 mb-6">
+        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
+          <h2 className="bz-serif text-lg font-semibold mb-2 text-[#1F6F5C]">Argent entré (revenus)</h2>
+          {ligne("Ventes", b.rVentes)}
+          {ligne("Caisse", b.rCaisse)}
+          {ligne("Total revenus", b.revenus, true)}
+          <p className="bz-sans text-xs text-[#9AA0A6] mt-2">
+            Dont encaissé : <span className="bz-mono">{fcfa(encaisseVentes + b.rCaisse)}</span> · reste à encaisser (crédit) : <span className="bz-mono">{fcfa(resteVentes)}</span>
+          </p>
+        </div>
+        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
+          <h2 className="bz-serif text-lg font-semibold mb-2 text-[#C1652F]">Argent sorti (dépenses)</h2>
+          {ligne("Dépenses diverses", b.dDepenses)}
+          {ligne("Paiements aux teinturiers", b.dTeint)}
+          {ligne("Production (teinture entreprise)", b.dProd)}
+          {ligne("Total dépenses", b.charges, true)}
+        </div>
+      </div>
+
+      <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
+        <h2 className="bz-serif text-lg font-semibold mb-4">Bénéfice des 6 derniers mois</h2>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={graph}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#EFEBDF" />
+            <XAxis dataKey="mois" tick={{ fontSize: 12, fontFamily: "Inter" }} stroke="#9AA0A6" />
+            <YAxis tick={{ fontSize: 12, fontFamily: "Inter" }} stroke="#9AA0A6" width={70} tickFormatter={(v) => fcfa(v)} />
+            <Tooltip formatter={(v) => fcfa(v)} contentStyle={{ fontFamily: "Inter", fontSize: 13 }} />
+            <Bar dataKey="benefice" radius={[2, 2, 0, 0]}>
+              {graph.map((g, i) => (
+                <Cell key={i} fill={g.benefice >= 0 ? "#1F6F5C" : "#C1652F"} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }
