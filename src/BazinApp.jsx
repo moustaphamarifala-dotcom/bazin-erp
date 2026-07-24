@@ -453,28 +453,60 @@ function Dashboard({ clients, stock, lowStock, ventes, caisse, teintures, comman
   teintures.forEach((t) => { if (!t.regle && nbr(t.prix) > 0) { const n = (t.teinturier || "").trim() || "Sans nom"; teintTot[n] = (teintTot[n] || 0) + nbr(t.prix); } });
   const teinturiersAPayer = Object.entries(teintTot);
 
+  // tons sémantiques : émeraude = recette, or = argent, rouge = dépense/dû, orange = alerte
   const cards = [
-    ["Ventes du jour", fcfa(ventesJour), "ventes", "#1B2430"],
-    ["Caisse du jour", fcfa(caisseJour), "caisse", "#1F6F5C"],
-    ["Reste à encaisser (crédits)", fcfa(credits), "rappels", "#C1652F"],
-    ["À payer aux teinturiers", fcfa(aPayerTeint), "teintures", "#C1652F"],
-    ["Commandes à retirer", String(cmdARetirer.length), "commandes", "#1B2430"],
-    ["Bénéfice ce mois", fcfa(benefMois), "bilan", benefMois >= 0 ? "#1F6F5C" : "#C1652F"],
+    { label: "Ventes du jour", val: fcfa(ventesJour), dest: "ventes", tone: "#1F6F5C" },
+    { label: "Caisse du jour", val: fcfa(caisseJour), dest: "caisse", tone: "#B9832F" },
+    { label: "Reste à encaisser", val: fcfa(credits), dest: "rappels", tone: "#C1652F" },
+    { label: "À payer teinturiers", val: fcfa(aPayerTeint), dest: "teintures", tone: "#B23A2E" },
+    { label: "Commandes à retirer", val: String(cmdARetirer.length), dest: "commandes", tone: "#1B2430" },
+    { label: "Articles en stock", val: String(stock.length), dest: "stock", tone: lowStock.length > 0 ? "#C1652F" : "#1B2430" },
   ];
 
   const rien = cmdUrgent.length === 0 && creditsAnciens.length === 0 && teinturiersAPayer.length === 0 && lowStock.length === 0;
 
   return (
     <div>
-      <h1 className="bz-serif text-3xl font-semibold mb-1">Tableau de bord</h1>
-      <p className="bz-sans text-[#5B5F55] mb-8">Vue d'ensemble de l'activité de Bazin — {fmtDate(jour)}.</p>
+      <div className="flex items-baseline justify-between mb-1">
+        <h1 className="bz-serif text-3xl font-semibold">Tableau de bord</h1>
+        <span className="bz-mono text-sm text-[#9AA0A6]">{fmtDate(jour)}</span>
+      </div>
+      <p className="bz-sans text-[#5B5F55] mb-6">Le cockpit de votre entreprise Bazin.</p>
+
+      {/* ---- Bandeau principal : bénéfice du mois ---- */}
+      <div className="rounded-sm p-6 mb-6 bg-[#1B2430] text-white">
+        <div className="flex flex-wrap items-end justify-between gap-6">
+          <div>
+            <div className="bz-sans text-xs uppercase tracking-widest text-[#D6A756] mb-1">Bénéfice du mois</div>
+            <div className="bz-mono text-4xl font-semibold" style={{ color: benefMois >= 0 ? "#4FC38E" : "#E8836A" }}>{fcfa(benefMois)}</div>
+            <div className="bz-sans text-xs text-white/50 mt-1">
+              {benefMois >= 0 ? "Vous gagnez de l'argent ce mois-ci." : "Les dépenses dépassent les recettes ce mois-ci."}
+            </div>
+          </div>
+          <div className="flex gap-8">
+            <div>
+              <div className="bz-sans text-xs uppercase tracking-wide text-white/50 mb-0.5">Recettes</div>
+              <div className="bz-mono text-2xl" style={{ color: "#4FC38E" }}>{fcfa(revMois)}</div>
+            </div>
+            <div>
+              <div className="bz-sans text-xs uppercase tracking-wide text-white/50 mb-0.5">Dépenses</div>
+              <div className="bz-mono text-2xl" style={{ color: "#E8836A" }}>{fcfa(depMois)}</div>
+            </div>
+          </div>
+          <button onClick={() => setTab("bilan")}
+            className="bz-sans text-sm border border-white/25 rounded-sm px-4 py-2 hover:bg-white/10 whitespace-nowrap">
+            Voir le bilan détaillé →
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-3 gap-4 mb-8">
-        {cards.map(([label, value, dest, couleur]) => (
+        {cards.map(({ label, val, dest, tone }) => (
           <button key={label} onClick={() => setTab(dest)}
-            className="text-left bg-white border border-[#D8D2C2] rounded-sm px-5 py-4 hover:border-[#1F6F5C] transition-colors">
+            className="text-left bg-white border border-[#D8D2C2] rounded-sm px-5 py-4 hover:shadow-md transition-shadow"
+            style={{ borderLeftWidth: "4px", borderLeftColor: tone }}>
             <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">{label}</div>
-            <div className="bz-mono text-2xl font-medium" style={{ color: couleur }}>{value}</div>
+            <div className="bz-mono text-2xl font-medium" style={{ color: tone }}>{val}</div>
           </button>
         ))}
       </div>
