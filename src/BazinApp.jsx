@@ -1451,6 +1451,7 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
   const [selection, setSelection] = useState(null); // nom du teinturier ouvert
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
+  const [montantPaie, setMontantPaie] = useState(""); // montant du paiement en cours de saisie
 
   const qualites = ["Vainqueur blanc", "Moins riche", "Riche", "Habillement homme", "Habillement femme"];
 
@@ -1467,11 +1468,9 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
     };
     teintures.forEach((t) => {
       const e = ensure(nomDe(t));
-      const prix = Number(t.prix) || 0;
       e.nb += 1;
-      e.total += prix;
+      e.total += Number(t.prix) || 0; // total dû = somme de tous les prix de teinture
       if (t.statut !== "renvoye") e.enTeinture += 1;
-      if (!t.regle) e.aPayer += prix;
     });
     // Les paiements archivés font apparaître le teinturier même sans lignes,
     // et donnent le total déjà payé (l'archive n'est jamais supprimée).
@@ -1479,6 +1478,8 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
       const e = ensure((p.teinturier || "").trim() || "Sans nom");
       e.dejaPaye += Number(p.montant) || 0;
     });
+    // Reste à payer = total dû − déjà payé (permet les paiements par étapes)
+    map.forEach((e) => { e.aPayer = Math.max(0, e.total - e.dejaPaye); });
     return [...map.values()].sort((a, b) => a.nom.localeCompare(b.nom));
   }, [teintures, paiements]);
 
@@ -1506,28 +1507,22 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
   const totalPayeArchive = (nom) =>
     paiements.filter((p) => (p.teinturier || "") === nom).reduce((s, p) => s + (Number(p.montant) || 0), 0);
   const totalPayeGlobal = paiements.reduce((s, p) => s + (Number(p.montant) || 0), 0);
+  const totalDuTeinturier = (nom) =>
+    teintures.filter((t) => nomDe(t) === nom).reduce((s, t) => s + (Number(t.prix) || 0), 0);
 
-  // Payer un teinturier : arrête le compte (le reste à payer repart de zéro),
-  // et enregistre le montant dans l'archive des paiements (jamais supprimée).
-  const payer = (nom) => {
-    const dus = teintures.filter((t) => nomDe(t) === nom && !t.regle && (Number(t.prix) || 0) > 0);
-    const montant = dus.reduce((s, t) => s + (Number(t.prix) || 0), 0);
-    if (montant <= 0) {
-      alert("Rien à payer pour ce teinturier pour le moment.");
-      return;
-    }
-    if (!window.confirm(
-      `Confirmer le paiement de ${fcfa(montant)} à ${nom} ?\n\nLe compte repart à zéro et le montant est enregistré dans l'archive des paiements (l'historique n'est pas supprimé).`
-    )) return;
-    const d = today();
-    saveTeintures(teintures.map((t) =>
-      (nomDe(t) === nom && !t.regle && (Number(t.prix) || 0) > 0)
-        ? { ...t, regle: true, datePaiement: d }
-        : t
-    ));
+  // Enregistrer un paiement (partiel ou total) : le montant s'ajoute à l'archive
+  // et le reste à payer diminue d'autant. On peut payer étape par étape.
+  const enregistrerPaiement = (nom, montant) => {
+    const m = Number(montant) || 0;
+    if (m <= 0) { alert("Entrez un montant à payer."); return false; }
+    const reste = Math.max(0, totalDuTeinturier(nom) - totalPayeArchive(nom));
+    if (m > reste && !window.confirm(
+      `Vous payez ${fcfa(m)} alors qu'il ne reste que ${fcfa(reste)} à payer. Continuer quand même ?`
+    )) return false;
     if (savePaiements) {
-      savePaiements([...paiements, { id: uid(), teinturier: nom, date: d, montant, nb: dus.length }]);
+      savePaiements([...paiements, { id: uid(), teinturier: nom, date: today(), montant: m }]);
     }
+    return true;
   };
 
   const creerTeinturier = (e) => {
@@ -1566,11 +1561,14 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
         total: lignes.filter((t) => t.qualite === q).reduce((s, t) => s + (Number(t.quantite) || 0), 0),
       }))
       .filter((e) => e.total > 0);
-    const aPayerSel = lignes.filter((t) => !t.regle).reduce((s, t) => s + (Number(t.prix) || 0), 0);
     const dejaPayeSel = totalPayeArchive(selection);
+    const aPayerSel = Math.max(0, totalDuTeinturier(selection) - dejaPayeSel);
     const archiveSel = paiements
       .filter((p) => (p.teinturier || "") === selection)
       .sort((a, b) => (a.date < b.date ? 1 : -1));
+    const faire_paiement = (montant) => {
+      if (enregistrerPaiement(selection, montant)) setMontantPaie("");
+    };
     return (
       <div>
         <button onClick={() => setSelection(null)}
@@ -1585,10 +1583,6 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
             </p>
           </div>
           <div className="flex gap-2 items-center">
-            <button onClick={() => payer(selection)} disabled={aPayerSel <= 0}
-              className={`bz-sans px-4 py-2 rounded-sm text-sm font-medium ${aPayerSel > 0 ? "bg-[#1B2430] text-white hover:bg-black" : "bg-[#EFEBDF] text-[#9AA0A6] cursor-not-allowed"}`}>
-              J'ai payé — arrêter le compte
-            </button>
             <button onClick={() => exportTeintures(lignes, `bazin-teinture-${selection}.csv`)}
               className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
               Exporter CSV
@@ -1600,11 +1594,26 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
           </div>
         </div>
 
-        {/* ---- Compte courant ---- */}
+        {/* ---- Compte courant + paiement par étapes ---- */}
         <div className="grid grid-cols-3 gap-4 mb-4">
           <div className="bg-white border border-[#C1652F] rounded-sm px-5 py-4">
-            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Reste à payer (compte en cours)</div>
-            <div className="bz-mono text-2xl font-medium text-[#C1652F]">{fcfa(aPayerSel)}</div>
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Reste à payer</div>
+            <div className="bz-mono text-2xl font-medium text-[#C1652F] mb-2">{fcfa(aPayerSel)}</div>
+            <div className="flex gap-2">
+              <input type="number" min="0" step="1" placeholder="Montant à payer"
+                className={inputCls + " bz-mono text-right w-full py-1.5"} value={montantPaie}
+                onChange={(e) => setMontantPaie(e.target.value)} />
+              <button onClick={() => faire_paiement(montantPaie)} disabled={aPayerSel <= 0 && !montantPaie}
+                className="bz-sans bg-[#1B2430] text-white px-3 py-1.5 rounded-sm text-sm whitespace-nowrap hover:bg-black">
+                Payer
+              </button>
+            </div>
+            {aPayerSel > 0 && (
+              <button onClick={() => faire_paiement(aPayerSel)}
+                className="bz-sans text-xs text-[#1F6F5C] mt-1.5 hover:underline">
+                Payer tout le reste ({fcfa(aPayerSel)})
+              </button>
+            )}
           </div>
           <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
             <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Déjà payé (total)</div>
@@ -1682,7 +1691,6 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
                 <th className="px-3 py-3 w-20">Qté</th>
                 <th className="px-3 py-3 w-32">Prix (F CFA)</th>
                 <th className="px-3 py-3 w-32">Renvoyé ?</th>
-                <th className="px-3 py-3 w-36">Règlement</th>
                 <th className="px-3 py-3">Notes</th>
                 <th className="px-3 py-3 w-10"></th>
               </tr>
@@ -1690,14 +1698,14 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
             <tbody>
               {lignes.length === 0 && (
                 <tr>
-                  <td colSpan="9" className="px-5 py-6 text-[#9AA0A6]">
+                  <td colSpan="8" className="px-5 py-6 text-[#9AA0A6]">
                     Aucune ligne. Cliquez sur « + Ajouter une ligne » et remplissez les cases directement, comme dans Excel.
                   </td>
                 </tr>
               )}
               {lignes.map((t) => (
                 <tr key={t.id}
-                  className={`border-b border-[#EFEBDF] last:border-0 ${t.regle ? "bg-[#F2F1EC] text-[#9AA0A6]" : (t.statut === "renvoye" ? "" : "bg-[#FDF8EF]")}`}>
+                  className={`border-b border-[#EFEBDF] last:border-0 ${t.statut === "renvoye" ? "" : "bg-[#FDF8EF]"}`}>
                   <td className="px-1 py-1">
                     <input type="date" className={cellText + " bz-mono"} value={t.date || ""}
                       onChange={(e) => update(t.id, { date: e.target.value })} />
@@ -1731,15 +1739,6 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
                       <option value="renvoye">Oui</option>
                     </select>
                   </td>
-                  <td className="px-3 py-1 text-xs whitespace-nowrap">
-                    {t.regle ? (
-                      <span className="text-[#1F6F5C]">Payé{t.datePaiement ? " le " + fmtDate(t.datePaiement) : ""}</span>
-                    ) : (Number(t.prix) || 0) > 0 ? (
-                      <span className="text-[#C1652F]">À payer</span>
-                    ) : (
-                      <span className="text-[#9AA0A6]">—</span>
-                    )}
-                  </td>
                   <td className="px-1 py-1">
                     <input className={cellText} value={t.notes || ""}
                       onChange={(e) => update(t.id, { notes: e.target.value })} />
@@ -1755,7 +1754,7 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
         </div>
         <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
           Écrivez directement dans les cases : tout est enregistré automatiquement. Les lignes en jaune clair sont les bazins encore en teinture.
-          Quand vous payez le teinturier, cliquez sur « J'ai payé — arrêter le compte » : les lignes dues passent en « Payé » (grisées) et le reste à payer revient à zéro. Les nouveaux travaux repartent sur un nouveau compte.
+          Pour payer le teinturier, entrez le montant versé (une partie ou tout) dans « Reste à payer » puis « Payer » — vous pouvez payer par étapes. Chaque versement s'ajoute à l'archive et le reste à payer diminue d'autant.
         </p>
       </div>
     );
