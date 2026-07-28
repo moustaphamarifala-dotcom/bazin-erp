@@ -247,6 +247,7 @@ export default function BazinApp() {
           {[
             ["dashboard", "Tableau de bord"],
             ["bilan", "Bilan & bénéfice"],
+            ["comptabilite", "Comptabilité"],
             ["caisse", "Caisse"],
             ["rappels", "Rappels WhatsApp"],
             ["clients", "Clients"],
@@ -293,6 +294,7 @@ export default function BazinApp() {
             ventes={ventes}
             caisse={caisse}
             teintures={teintures}
+            paiementsTeint={paiementsTeint}
             commandes={commandes}
             depenses={depenses}
             productions={productions}
@@ -304,7 +306,16 @@ export default function BazinApp() {
             ventes={ventes}
             caisse={caisse}
             depenses={depenses}
-            teintures={teintures}
+            paiementsTeint={paiementsTeint}
+            productions={productions}
+          />
+        )}
+        {tab === "comptabilite" && (
+          <ComptabiliteView
+            ventes={ventes}
+            caisse={caisse}
+            depenses={depenses}
+            paiementsTeint={paiementsTeint}
             productions={productions}
           />
         )}
@@ -421,17 +432,26 @@ function PrintView({ doc, clients, onClose }) {
 }
 
 
-function Dashboard({ clients, stock, lowStock, ventes, caisse, teintures, commandes, depenses, productions, setTab }) {
+function Dashboard({ clients, stock, lowStock, ventes, caisse, teintures, paiementsTeint = [], commandes, depenses, productions, setTab }) {
   const jour = today();
   const ym = moisCourant();
   const d30 = new Date();
   d30.setDate(d30.getDate() - 30);
   const seuil30 = d30.toISOString().slice(0, 10);
 
+  // Reste dû aux teinturiers = total des prix de teinture − total déjà payé (archive)
+  const duParTeint = {};
+  teintures.forEach((t) => { const n = (t.teinturier || "").trim() || "Sans nom"; duParTeint[n] = (duParTeint[n] || 0) + nbr(t.prix); });
+  const payeParTeint = {};
+  paiementsTeint.forEach((p) => { const n = (p.teinturier || "").trim() || "Sans nom"; payeParTeint[n] = (payeParTeint[n] || 0) + nbr(p.montant); });
+  const teinturiersAPayer = Object.keys(duParTeint)
+    .map((n) => [n, Math.max(0, duParTeint[n] - (payeParTeint[n] || 0))])
+    .filter(([, r]) => r > 0);
+  const aPayerTeint = teinturiersAPayer.reduce((s, [, r]) => s + r, 0);
+
   const ventesJour = ventes.filter((v) => v.date === jour).reduce((s, v) => s + venteTotal(v), 0);
   const caisseJour = caisse.filter((t) => (t.dateTime || "").slice(0, 10) === jour).reduce((s, t) => s + ticketTotal(t), 0);
   const credits = ventes.reduce((s, v) => s + venteReste(v), 0);
-  const aPayerTeint = teintures.reduce((s, t) => s + (t.regle ? 0 : nbr(t.prix)), 0);
   const cmdARetirer = commandes.filter((c) => c.statut !== "retiree");
 
   const revMois =
@@ -439,7 +459,7 @@ function Dashboard({ clients, stock, lowStock, ventes, caisse, teintures, comman
     caisse.filter((t) => dansMois((t.dateTime || "").slice(0, 10), ym)).reduce((s, t) => s + ticketTotal(t), 0);
   const depMois =
     depenses.filter((d) => dansMois(d.date, ym)).reduce((s, d) => s + nbr(d.montant), 0) +
-    teintures.filter((t) => t.regle && dansMois(t.datePaiement, ym)).reduce((s, t) => s + nbr(t.prix), 0) +
+    paiementsTeint.filter((p) => dansMois(p.date, ym)).reduce((s, p) => s + nbr(p.montant), 0) +
     productions.filter((p) => dansMois(p.date, ym)).reduce((s, p) => s + productionCout(p), 0);
   const benefMois = revMois - depMois;
 
@@ -453,9 +473,6 @@ function Dashboard({ clients, stock, lowStock, ventes, caisse, teintures, comman
   // Alertes "à faire aujourd'hui"
   const cmdUrgent = cmdARetirer.filter((c) => c.dateRetrait && c.dateRetrait <= jour);
   const creditsAnciens = ventes.filter((v) => venteReste(v) > 0 && v.date && v.date < seuil30);
-  const teintTot = {};
-  teintures.forEach((t) => { if (!t.regle && nbr(t.prix) > 0) { const n = (t.teinturier || "").trim() || "Sans nom"; teintTot[n] = (teintTot[n] || 0) + nbr(t.prix); } });
-  const teinturiersAPayer = Object.entries(teintTot);
 
   // tons sémantiques : émeraude = recette, or = argent, rouge = dépense/dû, orange = alerte
   const cards = [
@@ -3176,14 +3193,14 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
 }
 
 /* ============================================================ */
-function BilanView({ ventes, caisse, depenses, teintures, productions }) {
+function BilanView({ ventes, caisse, depenses, paiementsTeint = [], productions }) {
   const [mois, setMois] = useState(moisCourant());
 
   const beneficeDetail = (ym) => {
     const rVentes = ventes.filter((v) => dansMois(v.date, ym)).reduce((s, v) => s + venteTotal(v), 0);
     const rCaisse = caisse.filter((t) => dansMois((t.dateTime || "").slice(0, 10), ym)).reduce((s, t) => s + ticketTotal(t), 0);
     const dDepenses = depenses.filter((d) => dansMois(d.date, ym)).reduce((s, d) => s + nbr(d.montant), 0);
-    const dTeint = teintures.filter((t) => t.regle && dansMois(t.datePaiement, ym)).reduce((s, t) => s + nbr(t.prix), 0);
+    const dTeint = paiementsTeint.filter((p) => dansMois(p.date, ym)).reduce((s, p) => s + nbr(p.montant), 0);
     const dProd = productions.filter((p) => dansMois(p.date, ym)).reduce((s, p) => s + productionCout(p), 0);
     const revenus = rVentes + rCaisse;
     const charges = dDepenses + dTeint + dProd;
@@ -3288,6 +3305,210 @@ function BilanView({ ventes, caisse, depenses, teintures, productions }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+    </div>
+  );
+}
+
+/* ============================================================ */
+function ComptabiliteView({ ventes, caisse, depenses, paiementsTeint = [], productions }) {
+  const [mode, setMode] = useState("mois"); // mois | annee | tout
+  const [mois, setMois] = useState(moisCourant());
+  const [annee, setAnnee] = useState(String(new Date().getFullYear()));
+
+  // Construit tous les mouvements financiers à partir de la gestion
+  const mouvements = useMemo(() => {
+    const arr = [];
+    ventes.forEach((v) => {
+      const m = venteTotal(v);
+      if (m > 0) arr.push({ date: v.date || "", libelle: `Vente${v.client ? " — " + v.client : ""}${v.article ? " (" + v.article + ")" : ""}`, categorie: "Ventes", sens: "recette", montant: m });
+    });
+    caisse.forEach((t) => {
+      const m = ticketTotal(t);
+      if (m > 0) arr.push({ date: (t.dateTime || "").slice(0, 10), libelle: `Caisse — ticket ${t.numero || ""}`.trim(), categorie: "Caisse", sens: "recette", montant: m });
+    });
+    depenses.forEach((d) => {
+      const m = nbr(d.montant);
+      if (m > 0) arr.push({ date: d.date || "", libelle: `Dépense${d.libelle ? " — " + d.libelle : ""}${d.personne ? " (" + d.personne + ")" : ""}`, categorie: "Dépenses", sens: "depense", montant: m });
+    });
+    paiementsTeint.forEach((p) => {
+      const m = nbr(p.montant);
+      if (m > 0) arr.push({ date: p.date || "", libelle: `Paiement teinturier${p.teinturier ? " — " + p.teinturier : ""}`, categorie: "Teinturiers", sens: "depense", montant: m });
+    });
+    productions.forEach((p) => {
+      const m = productionCout(p);
+      if (m > 0) arr.push({ date: p.date || "", libelle: `Production${p.qualite ? " — " + p.qualite : ""}${p.couleur ? " " + p.couleur : ""}`, categorie: "Production", sens: "depense", montant: m });
+    });
+    return arr;
+  }, [ventes, caisse, depenses, paiementsTeint, productions]);
+
+  const dansPeriode = (dateStr) => {
+    if (!dateStr) return mode === "tout";
+    if (mode === "tout") return true;
+    if (mode === "annee") return dateStr.slice(0, 4) === annee;
+    return dateStr.slice(0, 7) === mois; // mois
+  };
+
+  const filtres = mouvements.filter((m) => dansPeriode(m.date)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  const recettes = filtres.filter((m) => m.sens === "recette").reduce((s, m) => s + m.montant, 0);
+  const depensesTot = filtres.filter((m) => m.sens === "depense").reduce((s, m) => s + m.montant, 0);
+  const resultat = recettes - depensesTot;
+
+  // Grand livre par catégorie
+  const parCategorie = {};
+  filtres.forEach((m) => {
+    if (!parCategorie[m.categorie]) parCategorie[m.categorie] = { sens: m.sens, total: 0 };
+    parCategorie[m.categorie].total += m.montant;
+  });
+  const catRecettes = Object.entries(parCategorie).filter(([, x]) => x.sens === "recette");
+  const catDepenses = Object.entries(parCategorie).filter(([, x]) => x.sens === "depense");
+
+  // solde cumulé pour le journal
+  let solde = 0;
+  const journal = filtres.map((m) => {
+    solde += m.sens === "recette" ? m.montant : -m.montant;
+    return { ...m, solde };
+  });
+
+  const periodeLabel = mode === "tout" ? "Toute la période" : mode === "annee" ? `Année ${annee}` : moisLabel(mois);
+
+  const exporter = () =>
+    exportCSV(
+      `bazin-comptabilite-${mode === "mois" ? mois : mode === "annee" ? annee : "tout"}.csv`,
+      journal.map((m) => ({
+        date: m.date,
+        libelle: m.libelle,
+        categorie: m.categorie,
+        recette: m.sens === "recette" ? m.montant : "",
+        depense: m.sens === "depense" ? m.montant : "",
+        solde: m.solde,
+      })),
+      [
+        { key: "date", label: "Date" },
+        { key: "libelle", label: "Libellé" },
+        { key: "categorie", label: "Catégorie" },
+        { key: "recette", label: "Recette (F CFA)" },
+        { key: "depense", label: "Dépense (F CFA)" },
+        { key: "solde", label: "Solde cumulé (F CFA)" },
+      ]
+    );
+
+  const anneesDispo = [...new Set(mouvements.map((m) => (m.date || "").slice(0, 4)).filter(Boolean))].sort().reverse();
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="bz-serif text-3xl font-semibold">Comptabilité</h1>
+          <p className="bz-sans text-[#5B5F55]">Journal général et compte de résultat, construits automatiquement depuis votre gestion.</p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option value="mois">Par mois</option>
+            <option value="annee">Par année</option>
+            <option value="tout">Tout</option>
+          </select>
+          {mode === "mois" && (
+            <input type="month" className={inputCls + " bz-mono"} value={mois} onChange={(e) => setMois(e.target.value)} />
+          )}
+          {mode === "annee" && (
+            <select className={inputCls + " bz-mono"} value={annee} onChange={(e) => setAnnee(e.target.value)}>
+              {(anneesDispo.length ? anneesDispo : [annee]).map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          )}
+          <button onClick={exporter} className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
+            Exporter CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Compte de résultat résumé */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4" style={{ borderLeftWidth: "4px", borderLeftColor: "#1F6F5C" }}>
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Total recettes — {periodeLabel}</div>
+          <div className="bz-mono text-2xl font-medium text-[#1F6F5C]">{fcfa(recettes)}</div>
+        </div>
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4" style={{ borderLeftWidth: "4px", borderLeftColor: "#C1652F" }}>
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Total dépenses</div>
+          <div className="bz-mono text-2xl font-medium text-[#C1652F]">{fcfa(depensesTot)}</div>
+        </div>
+        <div className="rounded-sm px-5 py-4 text-white" style={{ background: resultat >= 0 ? "#1F6F5C" : "#C1652F" }}>
+          <div className="bz-sans text-xs uppercase tracking-wide opacity-90 mb-1">Résultat ({resultat >= 0 ? "bénéfice" : "perte"})</div>
+          <div className="bz-mono text-2xl font-semibold">{fcfa(resultat)}</div>
+        </div>
+      </div>
+
+      {/* Grand livre par catégorie */}
+      <div className="grid grid-cols-2 gap-6 mb-6">
+        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
+          <h2 className="bz-serif text-lg font-semibold mb-2 text-[#1F6F5C]">Recettes par catégorie</h2>
+          {catRecettes.length === 0 ? <p className="bz-sans text-sm text-[#9AA0A6]">Aucune recette sur la période.</p> : (
+            catRecettes.map(([cat, x]) => (
+              <div key={cat} className="flex justify-between py-1.5 border-b border-[#EFEBDF] last:border-0">
+                <span className="bz-sans text-sm">{cat}</span>
+                <span className="bz-mono text-sm text-[#1F6F5C]">{fcfa(x.total)}</span>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
+          <h2 className="bz-serif text-lg font-semibold mb-2 text-[#C1652F]">Dépenses par catégorie</h2>
+          {catDepenses.length === 0 ? <p className="bz-sans text-sm text-[#9AA0A6]">Aucune dépense sur la période.</p> : (
+            catDepenses.map(([cat, x]) => (
+              <div key={cat} className="flex justify-between py-1.5 border-b border-[#EFEBDF] last:border-0">
+                <span className="bz-sans text-sm">{cat}</span>
+                <span className="bz-mono text-sm text-[#C1652F]">{fcfa(x.total)}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Journal général */}
+      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
+        <div className="px-5 py-3 border-b border-[#D8D2C2]">
+          <h2 className="bz-serif text-lg font-semibold">Journal général — {journal.length} écriture(s)</h2>
+        </div>
+        {journal.length === 0 ? (
+          <p className="bz-sans text-sm text-[#9AA0A6] p-6">Aucun mouvement sur la période choisie.</p>
+        ) : (
+          <table className="w-full text-sm bz-sans" style={{ minWidth: "820px" }}>
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+                <th className="px-4 py-3 w-28">Date</th>
+                <th className="px-4 py-3">Libellé</th>
+                <th className="px-4 py-3 w-28">Catégorie</th>
+                <th className="px-4 py-3 w-32 text-right">Recette</th>
+                <th className="px-4 py-3 w-32 text-right">Dépense</th>
+                <th className="px-4 py-3 w-32 text-right">Solde</th>
+              </tr>
+            </thead>
+            <tbody>
+              {journal.map((m, i) => (
+                <tr key={i} className="bz-row border-b border-[#EFEBDF] last:border-0">
+                  <td className="px-4 py-2 bz-mono">{fmtDate(m.date)}</td>
+                  <td className="px-4 py-2">{m.libelle}</td>
+                  <td className="px-4 py-2 text-[#5B5F55]">{m.categorie}</td>
+                  <td className="px-4 py-2 bz-mono text-right text-[#1F6F5C]">{m.sens === "recette" ? fcfa(m.montant) : ""}</td>
+                  <td className="px-4 py-2 bz-mono text-right text-[#C1652F]">{m.sens === "depense" ? fcfa(m.montant) : ""}</td>
+                  <td className={`px-4 py-2 bz-mono text-right ${m.solde >= 0 ? "text-[#1B2430]" : "text-[#C1652F]"}`}>{fcfa(m.solde)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-[#1B2430] font-semibold">
+                <td className="px-4 py-2" colSpan="3">Totaux — {periodeLabel}</td>
+                <td className="px-4 py-2 bz-mono text-right text-[#1F6F5C]">{fcfa(recettes)}</td>
+                <td className="px-4 py-2 bz-mono text-right text-[#C1652F]">{fcfa(depensesTot)}</td>
+                <td className="px-4 py-2 bz-mono text-right">{fcfa(resultat)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        )}
+      </div>
+      <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
+        Ce journal est construit automatiquement à partir de la gestion : Ventes et Caisse en recettes ; Dépenses, Paiements aux teinturiers et Production (teinture entreprise) en dépenses. Rien à saisir en double.
+      </p>
     </div>
   );
 }
