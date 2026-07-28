@@ -111,6 +111,7 @@ export default function BazinApp() {
   const [docs, setDocs] = useState([]);
   const [depenses, setDepenses] = useState([]);
   const [teintures, setTeintures] = useState([]);
+  const [paiementsTeint, setPaiementsTeint] = useState([]);
   const [commandes, setCommandes] = useState([]);
   const [ventes, setVentes] = useState([]);
   const [caisse, setCaisse] = useState([]);
@@ -127,7 +128,7 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d, dep, t, cmd, v, ca, prod] = await Promise.all([
+      const [c, f, s, d, dep, t, cmd, v, ca, prod, payT] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
@@ -138,6 +139,7 @@ export default function BazinApp() {
         load("bazin:ventes", []),
         load("bazin:caisse", []),
         load("bazin:productions", []),
+        load("bazin:paiementsTeint", []),
       ]);
       setClients(c);
       setFournisseurs(f);
@@ -149,6 +151,7 @@ export default function BazinApp() {
       setVentes(v);
       setCaisse(ca);
       setProductions(prod);
+      setPaiementsTeint(payT);
       setLoading(false);
     })();
   }, []);
@@ -169,6 +172,7 @@ export default function BazinApp() {
   const saveDocs = (next) => { setDocs(next); persist("bazin:documents", next); };
   const saveDepenses = (next) => { setDepenses(next); persist("bazin:depenses", next); };
   const saveTeintures = (next) => { setTeintures(next); persist("bazin:teintures", next); };
+  const savePaiementsTeint = (next) => { setPaiementsTeint(next); persist("bazin:paiementsTeint", next); };
   const saveCommandes = (next) => { setCommandes(next); persist("bazin:commandes", next); };
   const saveVentes = (next) => { setVentes(next); persist("bazin:ventes", next); };
   const saveCaisse = (next) => { setCaisse(next); persist("bazin:caisse", next); };
@@ -326,7 +330,7 @@ export default function BazinApp() {
           <DepensesView depenses={depenses} saveDepenses={saveDepenses} />
         )}
         {tab === "teintures" && (
-          <TeinturesView teintures={teintures} saveTeintures={saveTeintures} />
+          <TeinturesView teintures={teintures} saveTeintures={saveTeintures} paiements={paiementsTeint} savePaiements={savePaiementsTeint} />
         )}
         {tab === "commandes" && (
           <CommandesView commandes={commandes} saveCommandes={saveCommandes} />
@@ -1442,7 +1446,7 @@ function DepensesView({ depenses, saveDepenses }) {
 }
 
 /* ============================================================ */
-function TeinturesView({ teintures, saveTeintures }) {
+function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements }) {
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState(null); // nom du teinturier ouvert
   const [showNew, setShowNew] = useState(false);
@@ -1457,19 +1461,26 @@ function TeinturesView({ teintures, saveTeintures }) {
 
   const teinturiers = useMemo(() => {
     const map = new Map();
-    teintures.forEach((t) => {
-      const nom = nomDe(t);
+    const ensure = (nom) => {
       if (!map.has(nom)) map.set(nom, { nom, nb: 0, enTeinture: 0, total: 0, aPayer: 0, dejaPaye: 0 });
-      const e = map.get(nom);
+      return map.get(nom);
+    };
+    teintures.forEach((t) => {
+      const e = ensure(nomDe(t));
       const prix = Number(t.prix) || 0;
       e.nb += 1;
       e.total += prix;
       if (t.statut !== "renvoye") e.enTeinture += 1;
-      if (t.regle) e.dejaPaye += prix;
-      else e.aPayer += prix;
+      if (!t.regle) e.aPayer += prix;
+    });
+    // Les paiements archivés font apparaître le teinturier même sans lignes,
+    // et donnent le total déjà payé (l'archive n'est jamais supprimée).
+    paiements.forEach((p) => {
+      const e = ensure((p.teinturier || "").trim() || "Sans nom");
+      e.dejaPaye += Number(p.montant) || 0;
     });
     return [...map.values()].sort((a, b) => a.nom.localeCompare(b.nom));
-  }, [teintures]);
+  }, [teintures, paiements]);
 
   const teinturiersAffiches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1491,8 +1502,13 @@ function TeinturesView({ teintures, saveTeintures }) {
 
   const remove = (id) => saveTeintures(teintures.filter((t) => t.id !== id));
 
-  // Payer un teinturier : arrête le compte (marque comme réglé tout ce qui est dû),
-  // un nouveau compte recommence pour les prochains travaux.
+  // Total déjà payé à un teinturier, d'après l'archive permanente des paiements
+  const totalPayeArchive = (nom) =>
+    paiements.filter((p) => (p.teinturier || "") === nom).reduce((s, p) => s + (Number(p.montant) || 0), 0);
+  const totalPayeGlobal = paiements.reduce((s, p) => s + (Number(p.montant) || 0), 0);
+
+  // Payer un teinturier : arrête le compte (le reste à payer repart de zéro),
+  // et enregistre le montant dans l'archive des paiements (jamais supprimée).
   const payer = (nom) => {
     const dus = teintures.filter((t) => nomDe(t) === nom && !t.regle && (Number(t.prix) || 0) > 0);
     const montant = dus.reduce((s, t) => s + (Number(t.prix) || 0), 0);
@@ -1501,7 +1517,7 @@ function TeinturesView({ teintures, saveTeintures }) {
       return;
     }
     if (!window.confirm(
-      `Confirmer le paiement de ${fcfa(montant)} à ${nom} ?\n\nLe compte sera arrêté (remis à zéro). Si vous lui redonnez du travail, un nouveau compte recommencera.`
+      `Confirmer le paiement de ${fcfa(montant)} à ${nom} ?\n\nLe compte repart à zéro et le montant est enregistré dans l'archive des paiements (l'historique n'est pas supprimé).`
     )) return;
     const d = today();
     saveTeintures(teintures.map((t) =>
@@ -1509,6 +1525,9 @@ function TeinturesView({ teintures, saveTeintures }) {
         ? { ...t, regle: true, datePaiement: d }
         : t
     ));
+    if (savePaiements) {
+      savePaiements([...paiements, { id: uid(), teinturier: nom, date: d, montant, nb: dus.length }]);
+    }
   };
 
   const creerTeinturier = (e) => {
@@ -1548,12 +1567,10 @@ function TeinturesView({ teintures, saveTeintures }) {
       }))
       .filter((e) => e.total > 0);
     const aPayerSel = lignes.filter((t) => !t.regle).reduce((s, t) => s + (Number(t.prix) || 0), 0);
-    const dejaPayeSel = lignes.filter((t) => t.regle).reduce((s, t) => s + (Number(t.prix) || 0), 0);
-    const histMap = {};
-    lignes.filter((t) => t.regle && t.datePaiement).forEach((t) => {
-      histMap[t.datePaiement] = (histMap[t.datePaiement] || 0) + (Number(t.prix) || 0);
-    });
-    const historique = Object.entries(histMap).sort(([a], [b]) => (a < b ? 1 : -1));
+    const dejaPayeSel = totalPayeArchive(selection);
+    const archiveSel = paiements
+      .filter((p) => (p.teinturier || "") === selection)
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
     return (
       <div>
         <button onClick={() => setSelection(null)}
@@ -1595,20 +1612,51 @@ function TeinturesView({ teintures, saveTeintures }) {
           </div>
           <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
             <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Derniers paiements</div>
-            {historique.length === 0 ? (
+            {archiveSel.length === 0 ? (
               <div className="bz-sans text-sm text-[#9AA0A6]">Aucun paiement enregistré</div>
             ) : (
               <div className="flex flex-col gap-0.5">
-                {historique.slice(0, 3).map(([d, m]) => (
-                  <div key={d} className="bz-sans text-sm flex justify-between">
-                    <span className="text-[#5B5F55]">{fmtDate(d)}</span>
-                    <span className="bz-mono">{fcfa(m)}</span>
+                {archiveSel.slice(0, 3).map((p) => (
+                  <div key={p.id} className="bz-sans text-sm flex justify-between">
+                    <span className="text-[#5B5F55]">{fmtDate(p.date)}</span>
+                    <span className="bz-mono">{fcfa(p.montant)}</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
         </div>
+
+        {/* ---- Archive des paiements (permanente) ---- */}
+        {archiveSel.length > 0 && (
+          <div className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-4">
+            <div className="flex items-baseline justify-between mb-2">
+              <h2 className="bz-serif text-lg font-semibold">Archive des paiements à {selection}</h2>
+              <span className="bz-sans text-sm text-[#5B5F55]">Total versé : <span className="bz-mono font-medium text-[#1F6F5C]">{fcfa(dejaPayeSel)}</span></span>
+            </div>
+            <table className="w-full text-sm bz-sans">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+                  <th className="py-2">Date du paiement</th>
+                  <th className="py-2">Bazins réglés</th>
+                  <th className="py-2 text-right">Montant payé</th>
+                </tr>
+              </thead>
+              <tbody>
+                {archiveSel.map((p) => (
+                  <tr key={p.id} className="border-b border-[#EFEBDF] last:border-0">
+                    <td className="py-2 bz-mono">{fmtDate(p.date)}</td>
+                    <td className="py-2 text-[#5B5F55]">{p.nb || "—"}</td>
+                    <td className="py-2 text-right bz-mono">{fcfa(p.montant)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="bz-sans text-xs text-[#9AA0A6] mt-2">
+              Cette archive est conservée même si vous supprimez des lignes de teinture : c'est votre suivi des paiements versés à ce teinturier.
+            </p>
+          </div>
+        )}
 
         {parQualite.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-4">
@@ -1721,6 +1769,7 @@ function TeinturesView({ teintures, saveTeintures }) {
           <h1 className="bz-serif text-3xl font-semibold">Teinturiers</h1>
           <p className="bz-sans text-[#5B5F55]">
             {teinturiers.length} teinturier(s) · {teintures.filter((t) => t.statut !== "renvoye").length} bazin(s) encore en teinture
+            {" · "}total payé (paiements extérieurs) : <span className="bz-mono font-medium text-[#1F6F5C]">{fcfa(totalPayeGlobal)}</span>
           </p>
         </div>
         <div className="flex gap-2 items-center">
