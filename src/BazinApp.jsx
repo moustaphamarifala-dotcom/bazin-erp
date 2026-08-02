@@ -116,6 +116,7 @@ export default function BazinApp() {
   const [ventes, setVentes] = useState([]);
   const [caisse, setCaisse] = useState([]);
   const [productions, setProductions] = useState([]);
+  const [videos, setVideos] = useState([]);
 
   /* ---- chargement initial ---- */
   useEffect(() => {
@@ -128,7 +129,7 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d, dep, t, cmd, v, ca, prod, payT] = await Promise.all([
+      const [c, f, s, d, dep, t, cmd, v, ca, prod, payT, vid] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
@@ -140,6 +141,7 @@ export default function BazinApp() {
         load("bazin:caisse", []),
         load("bazin:productions", []),
         load("bazin:paiementsTeint", []),
+        load("bazin:videos", []),
       ]);
       setClients(c);
       setFournisseurs(f);
@@ -152,6 +154,7 @@ export default function BazinApp() {
       setCaisse(ca);
       setProductions(prod);
       setPaiementsTeint(payT);
+      setVideos(vid);
       setLoading(false);
     })();
   }, []);
@@ -176,6 +179,7 @@ export default function BazinApp() {
   const saveCommandes = (next) => { setCommandes(next); persist("bazin:commandes", next); };
   const saveVentes = (next) => { setVentes(next); persist("bazin:ventes", next); };
   const saveCaisse = (next) => { setCaisse(next); persist("bazin:caisse", next); };
+  const saveVideos = (next) => { setVideos(next); persist("bazin:videos", next); };
   const saveProductions = (next) => { setProductions(next); persist("bazin:productions", next); };
 
   /* ---- dérivés ---- */
@@ -249,6 +253,7 @@ export default function BazinApp() {
             ["bilan", "Bilan & bénéfice"],
             ["comptabilite", "Comptabilité"],
             ["businessplan", "Business plan"],
+            ["tiktok", "Studio TikTok"],
             ["caisse", "Caisse"],
             ["rappels", "Rappels WhatsApp"],
             ["clients", "Clients"],
@@ -321,6 +326,7 @@ export default function BazinApp() {
           />
         )}
         {tab === "businessplan" && <BusinessPlanView />}
+        {tab === "tiktok" && <TikTokView videos={videos} saveVideos={saveVideos} />}
         {tab === "clients" && (
           <ClientsView clients={clients} saveClients={saveClients} docs={docs} ventes={ventes} commandes={commandes} />
         )}
@@ -3730,6 +3736,192 @@ function BusinessPlanView() {
         <p className="bz-sans text-xs text-[#9AA0A6] mb-8">
           Ce plan est un point de départ ambitieux à adapter avec vos chiffres réels. La discipline quotidienne (tout enregistrer) + la montée en gamme (production, gros, export, SaaS) sont la clé du passage à l'échelle.
         </p>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================ */
+const IDEES_TIKTOK = [
+  { titre: "Transformation teinture", accroche: "Attends la fin… tu ne vas pas croire la couleur 😱", desc: "Filme le bazin blanc, puis la couleur finale après teinture. Coupe rapide sur la révélation." },
+  { titre: "Le tapage satisfaisant", accroche: "Le son le plus satisfaisant 🔨✨", desc: "Gros plan sur le tapage du bazin, le brillant qui apparaît. Son ASMR." },
+  { titre: "Devine le prix", accroche: "Devine le prix de ce bazin riche 👇", desc: "Montre une belle tenue, laisse les gens deviner en commentaire, révèle le prix." },
+  { titre: "GRWM cérémonie", accroche: "Je prépare mon bazin pour la Tabaski 🐏", desc: "\"Get ready with me\" : du choix du tissu à la tenue finie." },
+  { titre: "Avant / Après couturier", accroche: "De simple tissu à cette merveille ✨", desc: "Le métrage au départ → la tenue cousue portée." },
+  { titre: "Top 3 couleurs tendance", accroche: "Les 3 couleurs les plus demandées en ce moment 🔥", desc: "Montre 3 bazins tendance en défilé rapide sur une musique du moment." },
+  { titre: "Coulisses de l'atelier", accroche: "Comment on prépare ton bazin VIP de A à Z", desc: "Étapes : blanc, teinture, tapage, contrôle, emballage." },
+  { titre: "Témoignage / cliente", accroche: "Elle a fait sensation à ce mariage 💛", desc: "Cliente satisfaite en tenue (avec accord), avis en voix off." },
+  { titre: "Arrivage de la semaine", accroche: "Nouvel arrivage 🚨 lequel tu prends ?", desc: "Défilé rapide des nouveaux tissus, prix affichés à l'écran." },
+];
+const HASHTAGS_TIKTOK = "#bazin #bazinriche #getzner #senegal #dakar #mali #cotedivoire #tabaski #mariage #couture #mode #tissu #fyp #pourtoi";
+const STATUTS_VIDEO = ["Idée", "À filmer", "À monter", "À publier", "Publié"];
+
+function TikTokView({ videos, saveVideos }) {
+  const [idee, setIdee] = useState(IDEES_TIKTOK[0].titre);
+  const [produit, setProduit] = useState("");
+  const [prix, setPrix] = useState("");
+  const [occasion, setOccasion] = useState("");
+  const [copie, setCopie] = useState(false);
+
+  const ideeObj = IDEES_TIKTOK.find((i) => i.titre === idee) || IDEES_TIKTOK[0];
+
+  const legende = () => {
+    const p = produit.trim() || "notre bazin";
+    const lignes = [];
+    lignes.push(ideeObj.accroche);
+    lignes.push("");
+    let corps = `${p} disponible maintenant ✨`;
+    if (prix.trim()) corps += ` À partir de ${prix.trim()} F CFA.`;
+    if (occasion.trim()) corps += ` Parfait pour ${occasion.trim()}.`;
+    lignes.push(corps);
+    lignes.push("Livraison partout 🚚 — Commande en DM ou WhatsApp 📲");
+    lignes.push("");
+    lignes.push(HASHTAGS_TIKTOK);
+    return lignes.join("\n");
+  };
+
+  const copier = () => {
+    const txt = legende();
+    try {
+      navigator.clipboard.writeText(txt).then(() => { setCopie(true); setTimeout(() => setCopie(false), 2000); }, () => {});
+    } catch { /* ignore */ }
+  };
+
+  const planifier = (titre, accroche) => {
+    saveVideos([
+      ...videos,
+      { id: uid(), date: today(), idee: titre, produit: produit.trim(), accroche, statut: "Idée", notes: "" },
+    ]);
+  };
+
+  const update = (id, patch) => saveVideos(videos.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+  const remove = (id) => saveVideos(videos.filter((v) => v.id !== id));
+
+  const cellText = "w-full bg-transparent px-2 py-1.5 text-sm text-[#1B2430] border border-transparent rounded-sm focus:outline-none focus:border-[#1F6F5C] focus:bg-white";
+  const publiees = videos.filter((v) => v.statut === "Publié").length;
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h1 className="bz-serif text-3xl font-semibold">Studio TikTok</h1>
+        <p className="bz-sans text-[#5B5F55]">Des idées de vidéos qui marchent, des légendes prêtes à copier, et un planning pour faire décoller votre compte.</p>
+      </div>
+
+      <div className="bz-sans text-xs text-[#8A6D3B] bg-[#FBF3E0] border border-[#E7D8B5] rounded-sm px-4 py-2 mb-6">
+        L'application ne filme pas et ne publie pas à votre place : elle vous aide à <b>préparer</b> vos vidéos. Vous filmez avec votre téléphone, puis vous copiez la légende ici et vous publiez sur TikTok.
+      </div>
+
+      {/* Générateur de légende */}
+      <div className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-6">
+        <h2 className="bz-serif text-lg font-semibold mb-3">Générateur d'accroche & légende</h2>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <Field label="Type de vidéo">
+            <select className={inputCls} value={idee} onChange={(e) => setIdee(e.target.value)}>
+              {IDEES_TIKTOK.map((i) => <option key={i.titre} value={i.titre}>{i.titre}</option>)}
+            </select>
+          </Field>
+          <Field label="Produit mis en avant">
+            <input className={inputCls} placeholder="ex. Bazin riche VIP bleu" value={produit} onChange={(e) => setProduit(e.target.value)} />
+          </Field>
+          <Field label="Prix (facultatif)">
+            <input className={inputCls} placeholder="ex. 15 000" value={prix} onChange={(e) => setPrix(e.target.value)} />
+          </Field>
+          <Field label="Occasion (facultatif)">
+            <input className={inputCls} placeholder="ex. la Tabaski, un mariage" value={occasion} onChange={(e) => setOccasion(e.target.value)} />
+          </Field>
+        </div>
+        <div className="bg-[#FBF9F4] border border-[#EFEBDF] rounded-sm p-3 mb-3">
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Accroche (3 premières secondes)</div>
+          <div className="bz-sans font-medium mb-2">{ideeObj.accroche}</div>
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Légende à copier</div>
+          <pre className="bz-sans text-sm whitespace-pre-wrap text-[#1B2430]">{legende()}</pre>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={copier} className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+            {copie ? "Copié ✓" : "Copier la légende"}
+          </button>
+          <button onClick={() => planifier(ideeObj.titre, ideeObj.accroche)} className="bz-sans border border-[#D8D2C2] px-4 py-2 rounded-sm text-sm hover:bg-[#FBF9F4]">
+            + Ajouter au planning
+          </button>
+        </div>
+      </div>
+
+      {/* Idées virales */}
+      <h2 className="bz-serif text-xl font-semibold mb-3">Idées de vidéos virales</h2>
+      <div className="grid grid-cols-3 gap-4 mb-8">
+        {IDEES_TIKTOK.map((i) => (
+          <div key={i.titre} className="bg-white border border-[#D8D2C2] rounded-sm p-4 flex flex-col">
+            <div className="bz-serif font-semibold mb-1">{i.titre}</div>
+            <div className="bz-sans text-sm text-[#1F6F5C] italic mb-1">« {i.accroche} »</div>
+            <div className="bz-sans text-sm text-[#5B5F55] flex-1">{i.desc}</div>
+            <button onClick={() => planifier(i.titre, i.accroche)} className="bz-sans text-sm text-[#1F6F5C] hover:underline mt-2 text-left">
+              + Ajouter au planning
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Planning */}
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="bz-serif text-xl font-semibold">Mon planning de vidéos</h2>
+        <span className="bz-sans text-sm text-[#5B5F55]">{videos.length} vidéo(s) · {publiees} publiée(s)</span>
+      </div>
+      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto mb-3">
+        <table className="w-full text-sm bz-sans" style={{ minWidth: "860px" }}>
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+              <th className="px-3 py-3 w-36">Date</th>
+              <th className="px-3 py-3">Idée</th>
+              <th className="px-3 py-3">Produit</th>
+              <th className="px-3 py-3 w-36">Statut</th>
+              <th className="px-3 py-3">Notes</th>
+              <th className="px-3 py-3 w-10"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {videos.length === 0 && (
+              <tr><td colSpan="6" className="px-5 py-6 text-[#9AA0A6]">Aucune vidéo planifiée. Ajoutez une idée ci-dessus pour commencer.</td></tr>
+            )}
+            {[...videos].sort((a, b) => (a.date < b.date ? 1 : -1)).map((v) => (
+              <tr key={v.id} className={`border-b border-[#EFEBDF] last:border-0 ${v.statut === "Publié" ? "" : "bg-[#FDF8EF]"}`}>
+                <td className="px-1 py-1"><input type="date" className={cellText + " bz-mono"} value={v.date || ""} onChange={(e) => update(v.id, { date: e.target.value })} /></td>
+                <td className="px-1 py-1"><input className={cellText + " font-medium"} value={v.idee || ""} onChange={(e) => update(v.id, { idee: e.target.value })} /></td>
+                <td className="px-1 py-1"><input className={cellText} placeholder="Produit" value={v.produit || ""} onChange={(e) => update(v.id, { produit: e.target.value })} /></td>
+                <td className="px-1 py-1">
+                  <select className={cellText + " cursor-pointer " + (v.statut === "Publié" ? "text-[#1F6F5C] font-medium" : "text-[#B9832F] font-medium")}
+                    value={v.statut || "Idée"} onChange={(e) => update(v.id, { statut: e.target.value })}>
+                    {STATUTS_VIDEO.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </td>
+                <td className="px-1 py-1"><input className={cellText} placeholder="accroche, musique…" value={v.notes || ""} onChange={(e) => update(v.id, { notes: e.target.value })} /></td>
+                <td className="px-1 py-1 text-center"><button onClick={() => remove(v.id)} className="text-[#C1652F] hover:underline text-sm px-2">✕</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Conseils */}
+      <div className="grid grid-cols-2 gap-6">
+        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
+          <h2 className="bz-serif text-lg font-semibold mb-2">Règles pour devenir viral</h2>
+          <ul className="bz-sans text-sm text-[#1B2430] flex flex-col gap-1">
+            <li className="ml-4 list-disc marker:text-[#B9832F]">Accroche dans les <b>3 premières secondes</b> (une phrase choc ou une question).</li>
+            <li className="ml-4 list-disc marker:text-[#B9832F]">Vidéos <b>courtes</b> (10–25 s), format vertical plein écran.</li>
+            <li className="ml-4 list-disc marker:text-[#B9832F]">Utilisez une <b>musique tendance</b> du moment.</li>
+            <li className="ml-4 list-disc marker:text-[#B9832F]">Bonne <b>lumière</b> : filmez près d'une fenêtre, le bazin doit briller.</li>
+            <li className="ml-4 list-disc marker:text-[#B9832F]">Postez <b>1 vidéo par jour</b> — la régularité bat la perfection.</li>
+            <li className="ml-4 list-disc marker:text-[#B9832F]">Terminez par un <b>appel à l'action</b> : « commente », « DM », « suis-moi ».</li>
+          </ul>
+        </div>
+        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
+          <h2 className="bz-serif text-lg font-semibold mb-2">Meilleurs moments & hashtags</h2>
+          <p className="bz-sans text-sm mb-2"><b>Horaires</b> (heure locale) : 12h–14h et 19h–22h, quand les gens sont sur leur téléphone.</p>
+          <p className="bz-sans text-sm mb-1"><b>Hashtags à copier :</b></p>
+          <div className="bg-[#FBF9F4] border border-[#EFEBDF] rounded-sm p-2 text-sm bz-sans mb-2">{HASHTAGS_TIKTOK}</div>
+          <button onClick={() => { try { navigator.clipboard.writeText(HASHTAGS_TIKTOK); } catch {} }}
+            className="bz-sans text-sm text-[#1F6F5C] hover:underline">Copier les hashtags</button>
+        </div>
       </div>
     </div>
   );
