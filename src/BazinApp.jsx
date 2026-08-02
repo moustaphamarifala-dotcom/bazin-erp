@@ -254,7 +254,6 @@ export default function BazinApp() {
             ["comptabilite", "Comptabilité"],
             ["businessplan", "Business plan"],
             ["tiktok", "Studio TikTok"],
-            ["images", "Images IA"],
             ["caisse", "Caisse"],
             ["rappels", "Rappels WhatsApp"],
             ["clients", "Clients"],
@@ -328,7 +327,6 @@ export default function BazinApp() {
         )}
         {tab === "businessplan" && <BusinessPlanView />}
         {tab === "tiktok" && <TikTokView videos={videos} saveVideos={saveVideos} />}
-        {tab === "images" && <ImagesView />}
         {tab === "clients" && (
           <ClientsView clients={clients} saveClients={saveClients} docs={docs} ventes={ventes} commandes={commandes} />
         )}
@@ -3923,127 +3921,6 @@ function TikTokView({ videos, saveVideos }) {
           <div className="bg-[#FBF9F4] border border-[#EFEBDF] rounded-sm p-2 text-sm bz-sans mb-2">{HASHTAGS_TIKTOK}</div>
           <button onClick={() => { try { navigator.clipboard.writeText(HASHTAGS_TIKTOK); } catch {} }}
             className="bz-sans text-sm text-[#1F6F5C] hover:underline">Copier les hashtags</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================ */
-const TYPES_VISUEL = {
-  "Photo produit": (p, d, fmt) => `Photo professionnelle de studio d'un ${p || "bazin riche"}${d ? ", " + d : ""}, tissu bazin damassé (getzner) à l'aspect satiné et brillant, motifs du damassé nets et détaillés, plis élégants, fond uni beige crème, éclairage doux type softbox, ombres douces, ultra haute définition, rendu réaliste, ${fmt}.`,
-  "Affiche promotionnelle": (p, d, fmt) => `Affiche publicitaire élégante pour une boutique de bazin, mettant en avant un ${p || "bazin riche"}${d ? " " + d : ""}, tissu brillant et luxueux, espace pour un titre accrocheur et un prix, palette or et vert émeraude, style moderne et haut de gamme africain, ${fmt}.`,
-  "Tenue portée (mockup)": (p, d, fmt) => `Photo mode réaliste d'une personne élégante portant un grand boubou / une tenue africaine cousue dans un ${p || "bazin riche"}${d ? " " + d : ""}, tissu damassé brillant, pose de mannequin, décor élégant, lumière naturelle, ambiance cérémonie africaine chic, ${fmt}.`,
-  "Ambiance boutique": (p, d, fmt) => `Photo d'ambiance chaleureuse d'une belle boutique de bazin africaine, piles de tissus damassés colorés bien rangés${p ? ", dont " + p : ""}${d ? ", " + d : ""}, lumière dorée, décor soigné et haut de gamme, ${fmt}.`,
-  "Bannière avec texte": (p, d, fmt) => `Bannière graphique moderne pour réseaux sociaux d'une marque de bazin de luxe, fond en tissu damassé ${p || "élégant"}${d ? " " + d : ""}, couleurs or et vert émeraude, zone de titre bien lisible, style premium épuré, ${fmt}.`,
-};
-const FORMATS_IMG = {
-  "Carré (post)": "format carré 1:1",
-  "Vertical (story / TikTok)": "format vertical 9:16 plein écran",
-  "Horizontal (bannière)": "format horizontal 16:9",
-};
-const MODELES_PROMPT = [
-  "Gros plan macro sur un tissu bazin damassé bleu roi brillant, gouttes d'eau, motifs nets, lumière studio, ultra détaillé, format carré.",
-  "Pile de 5 bazins riches de couleurs différentes (blanc, bleu, vert, bordeaux, or) bien empilés sur une table en bois, lumière douce, fond neutre, format carré.",
-  "Femme africaine élégante en grand boubou de bazin riche doré lors d'une cérémonie, sourire, bijoux, lumière naturelle, format vertical 9:16.",
-  "Affiche 'Nouvel arrivage' pour une boutique de bazin, tissu brillant, or et vert émeraude, grand titre lisible, prix, style premium, format vertical.",
-];
-
-function ImagesView() {
-  const [type, setType] = useState(Object.keys(TYPES_VISUEL)[0]);
-  const [produit, setProduit] = useState("");
-  const [details, setDetails] = useState("");
-  const [format, setFormat] = useState(Object.keys(FORMATS_IMG)[0]);
-  const [copie, setCopie] = useState("");
-
-  const prompt = TYPES_VISUEL[type](produit.trim(), details.trim(), FORMATS_IMG[format]);
-
-  const copier = (txt, cle) => {
-    try { navigator.clipboard.writeText(txt).then(() => { setCopie(cle); setTimeout(() => setCopie(""), 2000); }, () => {}); } catch { /* */ }
-  };
-
-  return (
-    <div>
-      <div className="mb-6">
-        <h1 className="bz-serif text-3xl font-semibold">Images IA</h1>
-        <p className="bz-sans text-[#5B5F55]">Créez des visuels de bazin professionnels avec Nano Banana Pro (Gemini) — l'app écrit le prompt, vous générez l'image.</p>
-      </div>
-
-      <div className="bz-sans text-xs text-[#8A6D3B] bg-[#FBF3E0] border border-[#E7D8B5] rounded-sm px-4 py-2 mb-6">
-        Nano Banana Pro ne tourne pas dans l'application (il faut une clé Google payante et un serveur). L'app prépare le <b>prompt parfait</b> ; vous l'ouvrez dans <b>Gemini</b> (gratuit), collez le prompt et téléchargez l'image.
-      </div>
-
-      {/* Générateur de prompt */}
-      <div className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-6">
-        <h2 className="bz-serif text-lg font-semibold mb-3">Générateur de prompt</h2>
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <Field label="Type de visuel">
-            <select className={inputCls} value={type} onChange={(e) => setType(e.target.value)}>
-              {Object.keys(TYPES_VISUEL).map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </Field>
-          <Field label="Format">
-            <select className={inputCls} value={format} onChange={(e) => setFormat(e.target.value)}>
-              {Object.keys(FORMATS_IMG).map((f) => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </Field>
-          <Field label="Produit / sujet">
-            <input className={inputCls} placeholder="ex. bazin riche bleu roi" value={produit} onChange={(e) => setProduit(e.target.value)} />
-          </Field>
-          <Field label="Détails (facultatif)">
-            <input className={inputCls} placeholder="ex. plié, avec broderie dorée" value={details} onChange={(e) => setDetails(e.target.value)} />
-          </Field>
-        </div>
-        <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Prompt à copier</div>
-        <div className="bg-[#FBF9F4] border border-[#EFEBDF] rounded-sm p-3 mb-3 bz-sans text-sm text-[#1B2430]">{prompt}</div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => copier(prompt, "main")} className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
-            {copie === "main" ? "Copié ✓" : "Copier le prompt"}
-          </button>
-          <a href="https://gemini.google.com/" target="_blank" rel="noopener noreferrer"
-            className="bz-sans bg-[#1B2430] text-white px-4 py-2 rounded-sm text-sm hover:bg-black">
-            Ouvrir Gemini (Nano Banana) →
-          </a>
-          <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer"
-            className="bz-sans border border-[#D8D2C2] px-4 py-2 rounded-sm text-sm hover:bg-[#FBF9F4]">
-            Ouvrir Google AI Studio →
-          </a>
-        </div>
-      </div>
-
-      {/* Modèles de prompts */}
-      <h2 className="bz-serif text-xl font-semibold mb-3">Modèles de prompts prêts à l'emploi</h2>
-      <div className="grid grid-cols-2 gap-4 mb-8">
-        {MODELES_PROMPT.map((m, i) => (
-          <div key={i} className="bg-white border border-[#D8D2C2] rounded-sm p-4 flex flex-col">
-            <div className="bz-sans text-sm text-[#1B2430] flex-1">{m}</div>
-            <button onClick={() => copier(m, "m" + i)} className="bz-sans text-sm text-[#1F6F5C] hover:underline mt-2 text-left">
-              {copie === "m" + i ? "Copié ✓" : "Copier ce prompt"}
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {/* Guide + conseils */}
-      <div className="grid grid-cols-2 gap-6">
-        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
-          <h2 className="bz-serif text-lg font-semibold mb-2">Comment générer votre image</h2>
-          <ol className="bz-sans text-sm text-[#1B2430] flex flex-col gap-1 list-decimal ml-4 marker:text-[#B9832F]">
-            <li>Remplissez le générateur ci-dessus et cliquez <b>Copier le prompt</b>.</li>
-            <li>Cliquez <b>Ouvrir Gemini</b> (gratuit, connectez-vous avec un compte Google).</li>
-            <li>Collez le prompt et envoyez — Nano Banana Pro crée l'image.</li>
-            <li>Téléchargez l'image et utilisez-la sur WhatsApp, Facebook, TikTok ou vos affiches.</li>
-          </ol>
-        </div>
-        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5">
-          <h2 className="bz-serif text-lg font-semibold mb-2">Conseils pour de belles images</h2>
-          <ul className="bz-sans text-sm text-[#1B2430] flex flex-col gap-1">
-            <li className="ml-4 list-disc marker:text-[#B9832F]">Décrivez la <b>couleur exacte</b> et « tissu bazin damassé brillant ».</li>
-            <li className="ml-4 list-disc marker:text-[#B9832F]">Précisez le <b>fond</b> et la <b>lumière</b> (studio, douce, dorée).</li>
-            <li className="ml-4 list-disc marker:text-[#B9832F]">Ajoutez « haute définition, réaliste » pour la qualité.</li>
-            <li className="ml-4 list-disc marker:text-[#B9832F]">Vous pouvez aussi <b>envoyer une photo</b> de votre tissu à Gemini et lui demander une belle mise en scène.</li>
-            <li className="ml-4 list-disc marker:text-[#B9832F]">Générez plusieurs variantes et gardez la meilleure.</li>
-          </ul>
         </div>
       </div>
     </div>
