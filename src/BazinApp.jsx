@@ -3756,6 +3756,40 @@ const IDEES_TIKTOK = [
 const HASHTAGS_TIKTOK = "#bazin #bazinriche #getzner #senegal #dakar #mali #cotedivoire #tabaski #mariage #couture #mode #tissu #fyp #pourtoi";
 const STATUTS_VIDEO = ["Idée", "À filmer", "À monter", "À publier", "Publié"];
 
+/* Défi 30 jours : une idée de vidéo précise par jour */
+const PLAN_30J = [
+  ["Transformation teinture", "Attends la fin… tu ne vas pas croire la couleur 😱"],
+  ["Le tapage satisfaisant", "Le son le plus satisfaisant 🔨✨"],
+  ["Devine le prix", "Devine le prix de ce bazin riche 👇"],
+  ["Top 3 couleurs tendance", "Les 3 couleurs les plus demandées en ce moment 🔥"],
+  ["Arrivage de la semaine", "Nouvel arrivage 🚨 lequel tu prends ?"],
+  ["Coulisses de l'atelier", "Comment on prépare ton bazin de A à Z"],
+  ["Avant / Après couturier", "De simple tissu à cette merveille ✨"],
+  ["Le bazin qui brille", "Regarde comme il brille à la lumière 🤩"],
+  ["Erreur à éviter", "L'erreur que tout le monde fait en achetant du bazin ❌"],
+  ["GRWM cérémonie", "Je prépare ma tenue pour la cérémonie 💛"],
+  ["Question à la communauté", "Blanc ou couleur ? Réponds en commentaire 👇"],
+  ["Témoignage cliente", "Elle a fait sensation à ce mariage 💫"],
+  ["Comparatif qualités", "Riche, VIP, Siri Siri : la différence 👀"],
+  ["Emballage cadeau", "Emballe ce bazin avec moi 🎁"],
+  ["Le prix vous choque ?", "Voici pourquoi le vrai bazin coûte ce prix 💰"],
+  ["Défilé de couleurs", "Toutes mes couleurs en 15 secondes 🌈"],
+  ["Astuce entretien", "Comment garder ton bazin brillant longtemps ✅"],
+  ["Behind the scenes teinture", "Le mélange secret des couleurs 🎨"],
+  ["Commande spéciale", "On m'a demandé cette couleur… résultat 😍"],
+  ["Stock du jour", "Tout ce qui est dispo aujourd'hui 📦"],
+  ["Idée de tenue homme", "Le boubou parfait pour les hommes 🤵🏾"],
+  ["Idée de tenue femme", "L'inspiration tenue femme du jour 👗"],
+  ["Offre limitée", "Promo aujourd'hui seulement ⏰"],
+  ["Ma journée de vendeur", "Une journée dans mon business de bazin ☀️"],
+  ["Le tissu préféré des clients", "Le bazin que tout le monde m'achète 🥇"],
+  ["Réponse à un commentaire", "Tu m'as demandé, voici la réponse 💬"],
+  ["Zoom sur les motifs", "Regarde ces motifs de près 🔍"],
+  ["Livraison / colis", "On prépare ta commande pour la livraison 🚚"],
+  ["Best-of du mois", "Mes plus belles ventes du mois ✨"],
+  ["Merci + appel à suivre", "Merci pour votre confiance — abonne-toi 🙏🏾"],
+];
+
 function TikTokView({ videos, saveVideos }) {
   const [idee, setIdee] = useState(IDEES_TIKTOK[0].titre);
   const [produit, setProduit] = useState("");
@@ -3790,8 +3824,20 @@ function TikTokView({ videos, saveVideos }) {
   const planifier = (titre, accroche) => {
     saveVideos([
       ...videos,
-      { id: uid(), date: today(), idee: titre, produit: produit.trim(), accroche, statut: "Idée", notes: "" },
+      { id: uid(), date: today(), idee: titre, produit: produit.trim(), accroche, statut: "À filmer", notes: "", vues: "" },
     ]);
+  };
+
+  // Lance le défi 30 jours : crée 30 vidéos, une par jour à partir d'aujourd'hui
+  const lancerDefi = () => {
+    if (!window.confirm("Lancer le défi viral 30 jours ? 30 vidéos vont être ajoutées à votre planning (une par jour).")) return;
+    const base = new Date();
+    const nouvelles = PLAN_30J.map(([titre, accroche], i) => {
+      const d = new Date(base);
+      d.setDate(d.getDate() + i);
+      return { id: uid(), date: d.toISOString().slice(0, 10), idee: titre, produit: "", accroche, statut: "À filmer", notes: "", vues: "" };
+    });
+    saveVideos([...videos, ...nouvelles]);
   };
 
   const update = (id, patch) => saveVideos(videos.map((v) => (v.id === id ? { ...v, ...patch } : v)));
@@ -3799,6 +3845,13 @@ function TikTokView({ videos, saveVideos }) {
 
   const cellText = "w-full bg-transparent px-2 py-1.5 text-sm text-[#1B2430] border border-transparent rounded-sm focus:outline-none focus:border-[#1F6F5C] focus:bg-white";
   const publiees = videos.filter((v) => v.statut === "Publié").length;
+  const totalVues = videos.reduce((s, v) => s + (Number(v.vues) || 0), 0);
+  const meilleure = videos.filter((v) => Number(v.vues) > 0).sort((a, b) => Number(b.vues) - Number(a.vues))[0];
+  // La "vidéo du jour" : la prochaine non publiée, à filmer aujourd'hui ou avant
+  const jour = today();
+  const aFaire = videos.filter((v) => v.statut !== "Publié").sort((a, b) => (a.date < b.date ? -1 : 1));
+  const videoDuJour = aFaire.find((v) => (v.date || "") <= jour) || aFaire[0];
+  const defiEnCours = videos.length > 0;
 
   return (
     <div>
@@ -3809,6 +3862,28 @@ function TikTokView({ videos, saveVideos }) {
 
       <div className="bz-sans text-xs text-[#8A6D3B] bg-[#FBF3E0] border border-[#E7D8B5] rounded-sm px-4 py-2 mb-6">
         L'application ne filme pas et ne publie pas à votre place : elle vous aide à <b>préparer</b> vos vidéos. Vous filmez avec votre téléphone, puis vous copiez la légende ici et vous publiez sur TikTok.
+      </div>
+
+      {/* ---- Défi viral 30 jours ---- */}
+      <div className="rounded-sm p-6 mb-6 bg-[#1B2430] text-white">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="bz-sans text-xs uppercase tracking-widest text-[#D6A756] mb-1">Défi viral · 30 jours</div>
+            <div className="bz-serif text-xl font-semibold">Poste 1 vidéo par jour pendant 30 jours</div>
+            <div className="bz-sans text-sm text-white/60 mt-1">La régularité est le secret n°1 pour devenir viral. {defiEnCours ? `${publiees} vidéo(s) publiée(s).` : "Commence maintenant."}</div>
+          </div>
+          <button onClick={lancerDefi}
+            className="bz-sans bg-[#1F6F5C] text-white px-4 py-2.5 rounded-sm text-sm font-medium hover:bg-[#195A4A] whitespace-nowrap">
+            Lancer le défi 30 jours
+          </button>
+        </div>
+        {videoDuJour && (
+          <div className="mt-4 pt-4 border-t border-white/10">
+            <div className="bz-sans text-xs uppercase tracking-wide text-white/50 mb-1">🎬 Ta vidéo à filmer maintenant</div>
+            <div className="bz-sans"><b className="text-[#4FC38E]">{videoDuJour.idee}</b> — <span className="italic">« {videoDuJour.accroche || "à toi de trouver l'accroche"} »</span></div>
+            <div className="bz-sans text-xs text-white/50 mt-1">Prévue le {fmtDate(videoDuJour.date)} · statut : {videoDuJour.statut}</div>
+          </div>
+        )}
       </div>
 
       {/* Générateur de légende */}
@@ -3861,26 +3936,45 @@ function TikTokView({ videos, saveVideos }) {
         ))}
       </div>
 
+      {/* Suivi de performance */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4" style={{ borderLeftWidth: "4px", borderLeftColor: "#1F6F5C" }}>
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Vidéos publiées</div>
+          <div className="bz-mono text-2xl font-medium">{publiees}</div>
+        </div>
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4" style={{ borderLeftWidth: "4px", borderLeftColor: "#B9832F" }}>
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Total des vues</div>
+          <div className="bz-mono text-2xl font-medium">{totalVues.toLocaleString("fr-FR")}</div>
+        </div>
+        <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4" style={{ borderLeftWidth: "4px", borderLeftColor: "#1B2430" }}>
+          <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Meilleure vidéo</div>
+          {meilleure ? (
+            <div className="bz-sans text-sm"><b>{meilleure.idee}</b> — <span className="bz-mono">{Number(meilleure.vues).toLocaleString("fr-FR")}</span> vues 🔥</div>
+          ) : <div className="bz-sans text-sm text-[#9AA0A6]">Renseignez les vues pour la voir</div>}
+        </div>
+      </div>
+
       {/* Planning */}
       <div className="flex items-center justify-between mb-3">
         <h2 className="bz-serif text-xl font-semibold">Mon planning de vidéos</h2>
         <span className="bz-sans text-sm text-[#5B5F55]">{videos.length} vidéo(s) · {publiees} publiée(s)</span>
       </div>
       <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto mb-3">
-        <table className="w-full text-sm bz-sans" style={{ minWidth: "860px" }}>
+        <table className="w-full text-sm bz-sans" style={{ minWidth: "960px" }}>
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
               <th className="px-3 py-3 w-36">Date</th>
               <th className="px-3 py-3">Idée</th>
               <th className="px-3 py-3">Produit</th>
               <th className="px-3 py-3 w-36">Statut</th>
+              <th className="px-3 py-3 w-28">Vues</th>
               <th className="px-3 py-3">Notes</th>
               <th className="px-3 py-3 w-10"></th>
             </tr>
           </thead>
           <tbody>
             {videos.length === 0 && (
-              <tr><td colSpan="6" className="px-5 py-6 text-[#9AA0A6]">Aucune vidéo planifiée. Ajoutez une idée ci-dessus pour commencer.</td></tr>
+              <tr><td colSpan="7" className="px-5 py-6 text-[#9AA0A6]">Aucune vidéo planifiée. Lancez le défi 30 jours ou ajoutez une idée ci-dessus.</td></tr>
             )}
             {[...videos].sort((a, b) => (a.date < b.date ? 1 : -1)).map((v) => (
               <tr key={v.id} className={`border-b border-[#EFEBDF] last:border-0 ${v.statut === "Publié" ? "" : "bg-[#FDF8EF]"}`}>
@@ -3893,6 +3987,7 @@ function TikTokView({ videos, saveVideos }) {
                     {STATUTS_VIDEO.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </td>
+                <td className="px-1 py-1"><input type="number" min="0" className={cellText + " bz-mono text-right"} placeholder="0" value={v.vues ?? ""} onChange={(e) => update(v.id, { vues: e.target.value })} /></td>
                 <td className="px-1 py-1"><input className={cellText} placeholder="accroche, musique…" value={v.notes || ""} onChange={(e) => update(v.id, { notes: e.target.value })} /></td>
                 <td className="px-1 py-1 text-center"><button onClick={() => remove(v.id)} className="text-[#C1652F] hover:underline text-sm px-2">✕</button></td>
               </tr>
