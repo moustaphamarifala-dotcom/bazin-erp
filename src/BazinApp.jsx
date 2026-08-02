@@ -248,6 +248,7 @@ export default function BazinApp() {
             ["dashboard", "Tableau de bord"],
             ["bilan", "Bilan & bénéfice"],
             ["comptabilite", "Comptabilité"],
+            ["businessplan", "Business plan"],
             ["caisse", "Caisse"],
             ["rappels", "Rappels WhatsApp"],
             ["clients", "Clients"],
@@ -319,6 +320,7 @@ export default function BazinApp() {
             productions={productions}
           />
         )}
+        {tab === "businessplan" && <BusinessPlanView />}
         {tab === "clients" && (
           <ClientsView clients={clients} saveClients={saveClients} docs={docs} ventes={ventes} commandes={commandes} />
         )}
@@ -3221,7 +3223,7 @@ function BilanView({ ventes, caisse, depenses, paiementsTeint = [], productions 
       arr.push({ mois: moisLabel(ym), benefice: beneficeDetail(ym).benefice });
     }
     return arr;
-  }, [mois, ventes, caisse, depenses, teintures, productions]);
+  }, [mois, ventes, caisse, depenses, paiementsTeint, productions]);
 
   const ligne = (label, valeur, fort) => (
     <div className={`flex justify-between py-1.5 ${fort ? "border-t border-[#D8D2C2] mt-1 pt-2 font-semibold" : ""}`}>
@@ -3509,6 +3511,226 @@ function ComptabiliteView({ ventes, caisse, depenses, paiementsTeint = [], produ
       <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
         Ce journal est construit automatiquement à partir de la gestion : Ventes et Caisse en recettes ; Dépenses, Paiements aux teinturiers et Production (teinture entreprise) en dépenses. Rien à saisir en double.
       </p>
+    </div>
+  );
+}
+
+/* ============================================================ */
+function BusinessPlanView() {
+  const Section = ({ n, titre, children }) => (
+    <div className="bg-white border border-[#D8D2C2] rounded-sm p-6 mb-5" style={{ borderLeftWidth: "4px", borderLeftColor: "#1F6F5C" }}>
+      <div className="flex items-baseline gap-3 mb-3">
+        <span className="bz-mono text-sm text-[#B9832F]">{n}</span>
+        <h2 className="bz-serif text-xl font-semibold">{titre}</h2>
+      </div>
+      <div className="bz-sans text-sm text-[#1B2430] leading-relaxed flex flex-col gap-2">{children}</div>
+    </div>
+  );
+  const Li = ({ children }) => <li className="ml-4 list-disc marker:text-[#B9832F]">{children}</li>;
+
+  const proj = [
+    { annee: "An 1", ca: 36, benef: 9 },
+    { annee: "An 2", ca: 120, benef: 30 },
+    { annee: "An 3", ca: 350, benef: 90 },
+    { annee: "An 4", ca: 800, benef: 220 },
+    { annee: "An 5", ca: 1800, benef: 520 },
+  ];
+
+  return (
+    <div>
+      <div className="bz-no-print flex items-center justify-between mb-6">
+        <div>
+          <h1 className="bz-serif text-3xl font-semibold">Business plan</h1>
+          <p className="bz-sans text-[#5B5F55]">Feuille de route pour faire de Bazin une entreprise à plusieurs millions.</p>
+        </div>
+        <button onClick={() => window.print()} className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+          Imprimer / PDF
+        </button>
+      </div>
+
+      <div className="bz-print-area">
+        {/* Vision */}
+        <div className="rounded-sm p-6 mb-6 bg-[#1B2430] text-white">
+          <div className="bz-sans text-xs uppercase tracking-widest text-[#D6A756] mb-2">Vision</div>
+          <p className="bz-serif text-xl leading-snug">
+            Transformer un commerce de bazin en une <span className="text-[#4FC38E]">marque textile ouest-africaine intégrée</span> — production, teinture, vente en ligne et en gros — et faire de cet outil de gestion un produit vendu à d'autres commerçants.
+          </p>
+          <p className="bz-sans text-sm text-white/70 mt-3">
+            Objectif à 5 ans : ~1,8 milliard F CFA de chiffre d'affaires (≈ 3 M$), atteint par étapes réalistes. Repère : 1 $ ≈ 600 F CFA.
+          </p>
+        </div>
+
+        <Section n="01" titre="Étude de marché">
+          <p>Le bazin (damassé riche « getzner ») est un tissu de prestige incontournable en Afrique de l'Ouest : mariages, baptêmes, Tabaski, Magal, fêtes religieuses. La demande est structurelle, récurrente et peu sensible aux crises car liée aux événements sociaux.</p>
+          <ul className="flex flex-col gap-1">
+            <Li><b>Taille du marché</b> : plusieurs centaines de milliards de F CFA/an rien qu'au Sénégal, Mali, Côte d'Ivoire, Guinée ; diaspora en France, USA, Golfe très demandeuse.</Li>
+            <Li><b>Clients</b> : particuliers pour les cérémonies, tailleurs/couturiers, revendeurs de marché, clientèle diaspora en ligne.</Li>
+            <Li><b>Concurrence</b> : importateurs (marques Getzner), grossistes de HLM/Sandaga, milliers de revendeurs Facebook/WhatsApp. Peu de vraies marques structurées avec e-commerce et service.</Li>
+            <Li><b>Tendance</b> : montée du « bazin teint main » local, des couleurs mode (VIP, Facebook, Siri Siri) et de l'achat en ligne via Wave/Orange Money.</Li>
+          </ul>
+        </Section>
+
+        <Section n="02" titre="Proposition de valeur unique">
+          <p>« <b>Le bazin riche, teint main à la commande, livré partout, avec un suivi digne d'une grande maison.</b> »</p>
+          <ul className="flex flex-col gap-1">
+            <Li>Qualité maîtrisée de bout en bout : blanc sélectionné → teinture → tapage → contrôle.</Li>
+            <Li>Couleurs et finitions signature (VIP, Siri Siri, Facebook) que le client ne trouve pas ailleurs.</Li>
+            <Li>Service pro : reçu, suivi de commande, rappels et livraison — rareté chez les revendeurs informels.</Li>
+            <Li>Confiance : historique client, transparence des prix, garantie de reprise si défaut.</Li>
+          </ul>
+        </Section>
+
+        <Section n="03" titre="Modèle économique">
+          <p>Modèle intégré, marges croissantes à chaque étage :</p>
+          <ul className="flex flex-col gap-1">
+            <Li><b>B2C détail</b> : vente au mètre et à la pièce (marge 30–50 %).</Li>
+            <Li><b>Production / teinture</b> : acheter le blanc en gros, teindre soi-même, créer de la valeur (marge 40–70 %).</Li>
+            <Li><b>B2B gros</b> : fournir tailleurs et revendeurs en volume (marge 15–25 %, gros volumes).</Li>
+            <Li><b>Marque & e-commerce</b> : vente directe diaspora à prix premium (marge 50 %+).</Li>
+            <Li><b>Licence de l'outil</b> : louer cette application de gestion à d'autres commerçants de bazin (revenu récurrent, marge 80 %+).</Li>
+          </ul>
+        </Section>
+
+        <Section n="04" titre="Sources de revenus">
+          <ul className="flex flex-col gap-1">
+            <Li>Ventes au détail (boutique + WhatsApp/Facebook/TikTok).</Li>
+            <Li>Commandes teinture sur mesure (Siri Siri, VIP, Facebook, unique, modèle).</Li>
+            <Li>Vente en gros aux tailleurs et revendeurs.</Li>
+            <Li>Export / diaspora (colis France, USA, Golfe).</Li>
+            <Li>Prêt-à-porter et accessoires (marge & image de marque).</Li>
+            <Li>Abonnement SaaS de l'application (revenu mensuel récurrent).</Li>
+          </ul>
+        </Section>
+
+        <Section n="05" titre="Stratégie marketing">
+          <ul className="flex flex-col gap-1">
+            <Li><b>Contenu</b> : TikTok & Instagram Reels montrant la brillance du bazin, le tapage, les couleurs — 1 vidéo/jour minimum.</Li>
+            <Li><b>Preuve sociale</b> : photos clients en tenue, avis, « avant/après » teinture.</Li>
+            <Li><b>WhatsApp Business</b> : catalogue, statuts quotidiens, listes de diffusion segmentées (VIP, tailleurs, diaspora).</Li>
+            <Li><b>Saisonnalité</b> : campagnes fortes avant Tabaski, Magal, Ramadan, saison des mariages.</Li>
+            <Li><b>Influence</b> : partenariats avec créateurs de contenu et couturiers connus.</Li>
+            <Li><b>Fidélisation</b> : rappels automatiques, offres aux anciens clients (déjà dans l'app).</Li>
+          </ul>
+        </Section>
+
+        <Section n="06" titre="Plan commercial">
+          <ul className="flex flex-col gap-1">
+            <Li><b>Phase 1 (0–6 mois)</b> : consolider le détail + teinture, tenir les chiffres dans l'app, atteindre la rentabilité et un stock tournant.</Li>
+            <Li><b>Phase 2 (6–18 mois)</b> : monter un petit atelier de teinture/tapage, recruter 1–2 personnes, démarrer le gros auprès des tailleurs.</Li>
+            <Li><b>Phase 3 (18–36 mois)</b> : créer la marque (nom, logo, packaging), boutique physique + e-commerce, export diaspora.</Li>
+            <Li><b>Phase 4 (3–5 ans)</b> : réseau de revendeurs, distribution régionale (UEMOA), et licence de l'application aux autres commerçants.</Li>
+          </ul>
+        </Section>
+
+        <Section n="07" titre="Plan financier sur 5 ans">
+          <p className="text-[#5B5F55]">Projection d'objectifs (millions de F CFA). Ambitieuse et progressive — à réviser avec vos chiffres réels dans les onglets Bilan et Comptabilité.</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm bz-sans my-2" style={{ minWidth: "560px" }}>
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+                  <th className="py-2 pr-4">Année</th>
+                  <th className="py-2 pr-4 text-right">Chiffre d'affaires</th>
+                  <th className="py-2 pr-4 text-right">≈ USD</th>
+                  <th className="py-2 pr-4 text-right">Bénéfice estimé</th>
+                  <th className="py-2">Leviers</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  ["An 1", "36 M FCFA", "60 k$", "9 M FCFA", "Détail + teinture, solo/2 pers."],
+                  ["An 2", "120 M FCFA", "200 k$", "30 M FCFA", "Atelier, gros tailleurs"],
+                  ["An 3", "350 M FCFA", "580 k$", "90 M FCFA", "Marque, boutique, e-commerce"],
+                  ["An 4", "800 M FCFA", "1,3 M$", "220 M FCFA", "Export diaspora + licence app"],
+                  ["An 5", "1 800 M FCFA", "3 M$", "520 M FCFA", "Réseau régional + SaaS"],
+                ].map((r) => (
+                  <tr key={r[0]} className="border-b border-[#EFEBDF] last:border-0">
+                    <td className="py-2 pr-4 font-medium">{r[0]}</td>
+                    <td className="py-2 pr-4 text-right bz-mono">{r[1]}</td>
+                    <td className="py-2 pr-4 text-right bz-mono text-[#5B5F55]">{r[2]}</td>
+                    <td className="py-2 pr-4 text-right bz-mono text-[#1F6F5C]">{r[3]}</td>
+                    <td className="py-2 text-[#5B5F55]">{r[4]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="bz-no-print" style={{ height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={proj}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#EFEBDF" />
+                <XAxis dataKey="annee" tick={{ fontSize: 12, fontFamily: "Inter" }} stroke="#9AA0A6" />
+                <YAxis tick={{ fontSize: 12, fontFamily: "Inter" }} stroke="#9AA0A6" width={50} tickFormatter={(v) => v + "M"} />
+                <Tooltip formatter={(v, n) => [v + " M FCFA", n === "ca" ? "Chiffre d'affaires" : "Bénéfice"]} contentStyle={{ fontFamily: "Inter", fontSize: 13 }} />
+                <Bar dataKey="ca" fill="#1B2430" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="benef" fill="#1F6F5C" radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="text-xs text-[#9AA0A6]">Hypothèses : réinvestissement du bénéfice, montée en gamme, et diversification (gros, export, SaaS). Le passage au million de dollars repose surtout sur le gros, l'export diaspora et la licence de l'application.</p>
+        </Section>
+
+        <Section n="08" titre="Outils IA à utiliser">
+          <ul className="flex flex-col gap-1">
+            <Li><b>Cette application</b> : gestion, caisse, comptabilité, rappels — votre socle.</Li>
+            <Li><b>Génération de contenu</b> (ChatGPT/Claude) : légendes, descriptions produits, scripts de vidéos, réponses clients.</Li>
+            <Li><b>Visuels</b> (Canva IA, générateurs d'images) : affiches, catalogues, mises en scène de tissus.</Li>
+            <Li><b>Vidéo</b> (CapCut IA) : montage automatique de Reels/TikTok à partir de vos rushes.</Li>
+            <Li><b>Chatbot WhatsApp</b> : réponses automatiques, prise de commande 24/7 quand le volume grandit.</Li>
+            <Li><b>Analyse</b> : l'IA lit vos exports CSV (ventes, bilan) et suggère prix, ruptures, meilleurs clients.</Li>
+          </ul>
+        </Section>
+
+        <Section n="09" titre="Indicateurs clés (KPI)">
+          <ul className="flex flex-col gap-1">
+            <Li>Chiffre d'affaires jour / mois (onglet Bilan).</Li>
+            <Li>Bénéfice net et marge % (Comptabilité).</Li>
+            <Li>Panier moyen et nombre de ventes/jour.</Li>
+            <Li>Crédits en cours (argent dû) et délai moyen d'encaissement.</Li>
+            <Li>Rotation du stock (jours) et ruptures évitées.</Li>
+            <Li>Coût d'acquisition client vs valeur vie client.</Li>
+            <Li>Croissance des abonnés (TikTok, WhatsApp) et taux de conversion.</Li>
+          </ul>
+        </Section>
+
+        <Section n="10" titre="Risques & solutions">
+          <ul className="flex flex-col gap-1">
+            <Li><b>Trésorerie / crédits impayés</b> → limiter le crédit, relancer via l'app, acomptes obligatoires.</Li>
+            <Li><b>Rupture ou hausse du prix du blanc</b> → plusieurs fournisseurs, achats groupés, stock tampon.</Li>
+            <Li><b>Qualité de teinture irrégulière</b> → teinturiers fiables, contrôle, montage d'atelier interne.</Li>
+            <Li><b>Dépendance à une personne</b> → tout noter dans l'app, former une équipe, procédures écrites.</Li>
+            <Li><b>Saisonnalité</b> → lisser avec le gros et l'export hors saisons de fête.</Li>
+            <Li><b>Perte de données</b> → exporter et sauvegarder les CSV régulièrement (Google Drive).</Li>
+          </ul>
+        </Section>
+
+        <Section n="11" titre="Plan d'action : jour / semaine / mois">
+          <p className="font-medium text-[#1F6F5C]">Chaque jour</p>
+          <ul className="flex flex-col gap-1">
+            <Li>Enregistrer toutes les ventes et dépenses dans l'app (rien de côté).</Li>
+            <Li>Publier 1 contenu (photo/vidéo) et animer les statuts WhatsApp.</Li>
+            <Li>Relancer les crédits et prévenir les commandes prêtes (onglet Rappels).</Li>
+            <Li>Vérifier la caisse du jour le soir.</Li>
+          </ul>
+          <p className="font-medium text-[#1F6F5C] mt-2">Chaque semaine</p>
+          <ul className="flex flex-col gap-1">
+            <Li>Contrôler le stock, préparer les réassorts et lancer les teintures.</Li>
+            <Li>Payer/planifier les teinturiers (paiement par étapes) et fournisseurs.</Li>
+            <Li>Analyser les meilleures ventes et ajuster les prix.</Li>
+            <Li>Sauvegarder les données (export CSV).</Li>
+          </ul>
+          <p className="font-medium text-[#1F6F5C] mt-2">Chaque mois</p>
+          <ul className="flex flex-col gap-1">
+            <Li>Lire le Bilan et la Comptabilité : bénéfice, marge, trésorerie.</Li>
+            <Li>Fixer un objectif de CA pour le mois suivant (+10–20 %).</Li>
+            <Li>Réinvestir une part du bénéfice (stock, atelier, marketing).</Li>
+            <Li>Avancer d'une étape le plan commercial (nouveau canal, nouveau client gros, marque).</Li>
+          </ul>
+        </Section>
+
+        <p className="bz-sans text-xs text-[#9AA0A6] mb-8">
+          Ce plan est un point de départ ambitieux à adapter avec vos chiffres réels. La discipline quotidienne (tout enregistrer) + la montée en gamme (production, gros, export, SaaS) sont la clé du passage à l'échelle.
+        </p>
+      </div>
     </div>
   );
 }
