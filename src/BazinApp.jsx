@@ -2112,6 +2112,8 @@ function CommandesView({ commandes, saveCommandes }) {
 function VentesView({ ventes, saveVentes, stock, saveStock }) {
   const [query, setQuery] = useState("");
   const [filtreStatut, setFiltreStatut] = useState("tous");
+  const videRapide = { article: "", qualite: "Bazin teint", metrage: "", prixMetre: "", mode: "Espèces" };
+  const [rapide, setRapide] = useState(null); // formulaire de vente rapide (client de passage)
 
   const qualites = [
     "Vainqueur blanc",
@@ -2166,6 +2168,37 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
 
   const update = (id, patch) =>
     saveVentes(ventes.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+
+  // Total d'une vente rapide (métrage vide = 1, donc le prix devient le total)
+  const totalRapide = () => (Number(rapide?.metrage) || 1) * (Number(rapide?.prixMetre) || 0);
+
+  // Enregistre une vente rapide : client de passage, payée directement en entier
+  const enregistrerRapide = (e) => {
+    e.preventDefault();
+    const total = totalRapide();
+    if (total <= 0) { alert("Entrez le montant de la vente."); return; }
+    saveVentes([
+      ...ventes,
+      {
+        id: uid(),
+        date: today(),
+        client: "Client de passage",
+        telephone: "",
+        stockId: "",
+        article: rapide.article.trim(),
+        qualite: rapide.qualite,
+        metrage: rapide.metrage || "1",
+        prixMetre: rapide.prixMetre,
+        transport: "",
+        montantPaye: total, // payé en entier → statut Payé
+        modePaiement: rapide.mode,
+        deduitStock: false,
+        qteDeduit: 0,
+        notes: "",
+      },
+    ]);
+    setRapide({ ...videRapide });
+  };
 
   const addRow = () =>
     saveVentes([
@@ -2278,12 +2311,68 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
             className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
             Exporter CSV
           </button>
+          <button onClick={() => setRapide(rapide ? null : { ...videRapide })}
+            className="bz-sans bg-[#B9832F] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#A0701F]">
+            ⚡ Vente rapide
+          </button>
           <button onClick={addRow}
-            className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
-            + Nouvelle vente
+            className="bz-sans border border-[#1B2430] text-[#1B2430] px-4 py-2 rounded-sm text-sm font-medium hover:bg-[#1B2430] hover:text-white">
+            + Vente détaillée
           </button>
         </div>
       </div>
+
+      {/* ---- Vente rapide (client de passage, payé directement) ---- */}
+      {rapide && (
+        <form onSubmit={enregistrerRapide} className="bg-white border border-[#B9832F] rounded-sm p-5 mb-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="bz-serif text-lg font-semibold">Vente rapide — client de passage</h2>
+            <span className="bz-sans text-xs text-[#9AA0A6]">Payée directement · aucun crédit</span>
+          </div>
+          <div className="grid grid-cols-12 gap-3 items-end">
+            <div className="col-span-4">
+              <Field label="Article vendu (facultatif)">
+                <input className={inputCls} placeholder="ex. Bazin riche bleu 5 m" value={rapide.article}
+                  onChange={(e) => setRapide({ ...rapide, article: e.target.value })} />
+              </Field>
+            </div>
+            <div className="col-span-2">
+              <Field label="Métrage">
+                <input type="number" min="0" step="0.5" className={inputCls + " text-right"} placeholder="1"
+                  value={rapide.metrage} onChange={(e) => setRapide({ ...rapide, metrage: e.target.value })} />
+              </Field>
+            </div>
+            <div className="col-span-2">
+              <Field label="Prix / m (ou total)">
+                <input type="number" min="0" step="1" autoFocus className={inputCls + " text-right"} placeholder="0"
+                  value={rapide.prixMetre} onChange={(e) => setRapide({ ...rapide, prixMetre: e.target.value })} />
+              </Field>
+            </div>
+            <div className="col-span-2">
+              <Field label="Paiement">
+                <select className={inputCls} value={rapide.mode} onChange={(e) => setRapide({ ...rapide, mode: e.target.value })}>
+                  {modesPaiement.filter((m) => m !== "Crédit").map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </Field>
+            </div>
+            <div className="col-span-2 text-right">
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6]">Total payé</div>
+              <div className="bz-mono text-2xl font-semibold text-[#1F6F5C]">{fcfa(totalRapide())}</div>
+            </div>
+          </div>
+          <div className="flex gap-3 mt-4">
+            <button type="submit" className="bz-sans bg-[#1F6F5C] text-white px-5 py-2.5 rounded-sm text-sm font-medium hover:bg-[#195A4A]">
+              Enregistrer la vente (payée)
+            </button>
+            <button type="button" onClick={() => setRapide(null)} className="bz-sans px-4 py-2.5 rounded-sm text-sm border border-[#D8D2C2]">
+              Fermer
+            </button>
+          </div>
+          <p className="bz-sans text-xs text-[#9AA0A6] mt-2">
+            Laissez le métrage vide (= 1) et mettez le prix total pour aller encore plus vite. La vente est enregistrée comme « payée » au nom « Client de passage ».
+          </p>
+        </form>
+      )}
 
       <div className="grid grid-cols-3 gap-4 mb-5">
         <div className="bg-white border border-[#D8D2C2] rounded-sm px-5 py-4">
