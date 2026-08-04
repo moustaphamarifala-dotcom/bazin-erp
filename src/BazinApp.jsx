@@ -2402,156 +2402,113 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
         ))}
       </div>
 
-      <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
-        <table className="w-full text-sm bz-sans" style={{ minWidth: "1920px" }}>
-          <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
-              <th className="px-3 py-3 w-36">Date</th>
-              <th className="px-3 py-3">Client</th>
-              <th className="px-3 py-3 w-32">Numéro</th>
-              <th className="px-3 py-3 w-48">Article du stock</th>
-              <th className="px-3 py-3">Article vendu</th>
-              <th className="px-3 py-3 w-40">Qualité</th>
-              <th className="px-3 py-3 w-20">Mètre</th>
-              <th className="px-3 py-3 w-24">Prix / m</th>
-              <th className="px-3 py-3 w-24">Transport</th>
-              <th className="px-3 py-3 w-28 text-right">Total</th>
-              <th className="px-3 py-3 w-28 text-right">Bénéfice</th>
-              <th className="px-3 py-3 w-28">Payé</th>
-              <th className="px-3 py-3 w-28 text-right">Reste</th>
-              <th className="px-3 py-3 w-36">Mode paiement</th>
-              <th className="px-3 py-3 w-24">Statut</th>
-              <th className="px-3 py-3 w-40">Stock</th>
-              <th className="px-3 py-3 w-40"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan="18" className="px-5 py-6 text-[#9AA0A6]">
-                  {ventes.length === 0
-                    ? "Aucune vente. Cliquez sur « + Nouvelle vente » et remplissez les cases directement, comme dans Excel."
-                    : "Aucune vente ne correspond à ce filtre."}
-                </td>
-              </tr>
-            )}
-            {filtered.map((v) => {
-              const st = statutDe(v);
-              const reste = resteDe(v);
-              const item = stock.find((s) => s.id === v.stockId);
-              return (
-                <tr key={v.id}
-                  className={`border-b border-[#EFEBDF] last:border-0 ${st === "paye" ? "" : "bg-[#FDF8EF]"}`}>
-                  <td className="px-1 py-1">
-                    <input type="date" className={cellText + " bz-mono"} value={v.date || ""}
-                      onChange={(e) => update(v.id, { date: e.target.value })} />
-                  </td>
-                  <td className="px-1 py-1">
-                    <input className={cellText + " font-medium"} placeholder="Nom du client" value={v.client || ""}
-                      onChange={(e) => update(v.id, { client: e.target.value })} />
-                  </td>
-                  <td className="px-1 py-1">
-                    <input className={cellText + " bz-mono"} placeholder="Téléphone" value={v.telephone || ""}
-                      onChange={(e) => update(v.id, { telephone: e.target.value })} />
-                  </td>
-                  <td className="px-1 py-1">
-                    <select className={cellSelect} value={v.stockId || ""}
-                      disabled={v.deduitStock}
-                      onChange={(e) => choisirStock(v, e.target.value)}>
-                      <option value="">— hors stock —</option>
-                      {stock.map((s) => <option key={s.id} value={s.id}>{s.nom}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-1 py-1">
-                    <input className={cellText} placeholder="Ce qui est vendu" value={v.article || ""}
-                      onChange={(e) => update(v.id, { article: e.target.value })} />
-                  </td>
-                  <td className="px-1 py-1">
-                    <select className={cellSelect} value={v.qualite || qualites[0]}
-                      onChange={(e) => update(v.id, { qualite: e.target.value })}>
-                      {qualites.map((q) => <option key={q} value={q}>{q}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-1 py-1">
-                    <input type="number" min="0" step="0.5" className={cellText + " bz-mono text-right"} placeholder="0"
-                      value={v.metrage ?? ""}
-                      onChange={(e) => update(v.id, { metrage: e.target.value })} />
-                  </td>
-                  <td className="px-1 py-1">
-                    <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
-                      value={v.prixMetre ?? ""}
-                      onChange={(e) => update(v.id, { prixMetre: e.target.value })} />
-                  </td>
-                  <td className="px-1 py-1">
-                    <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
-                      value={v.transport ?? ""}
-                      onChange={(e) => update(v.id, { transport: e.target.value })} />
-                  </td>
-                  <td className="px-3 py-1 bz-mono text-right whitespace-nowrap font-medium">{fcfa(totalDe(v))}</td>
-                  <td className="px-3 py-1 bz-mono text-right whitespace-nowrap">
-                    {beneficeDe(v) === null
-                      ? <span className="text-[#9AA0A6]">—</span>
-                      : <span className={beneficeDe(v) >= 0 ? "text-[#1F6F5C]" : "text-[#C1652F]"}>{fcfa(beneficeDe(v))}</span>}
-                  </td>
-                  <td className="px-1 py-1">
-                    <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
-                      value={v.montantPaye ?? ""}
-                      onChange={(e) => update(v.id, { montantPaye: e.target.value })} />
-                  </td>
-                  <td className={`px-3 py-1 bz-mono text-right whitespace-nowrap ${reste > 0 ? "text-[#C1652F] font-medium" : "text-[#9AA0A6]"}`}>
-                    {fcfa(reste)}
-                  </td>
-                  <td className="px-1 py-1">
-                    <select className={cellSelect} value={v.modePaiement || modesPaiement[0]}
-                      onChange={(e) => update(v.id, { modePaiement: e.target.value })}>
-                      {modesPaiement.map((m) => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-2 py-1 whitespace-nowrap">
-                    <Tampon label={statutInfo[st].label} tone={statutInfo[st].tone} />
-                  </td>
-                  <td className="px-2 py-1 text-xs whitespace-nowrap">
-                    {v.stockId ? (
-                      <label className="flex items-center gap-1.5 cursor-pointer">
-                        <input type="checkbox" checked={!!v.deduitStock}
-                          onChange={() => basculerDeduction(v)} />
-                        {v.deduitStock
-                          ? <span className="text-[#1F6F5C]">retiré ({v.qteDeduit} m)</span>
-                          : <span className="text-[#5B5F55]">déduire · reste {item ? item.quantite : "?"}</span>}
-                      </label>
-                    ) : (
-                      <span className="text-[#9AA0A6]">—</span>
-                    )}
-                  </td>
-                  <td className="px-1 py-1 text-right whitespace-nowrap">
-                    {reste > 0 && v.telephone && (
-                      <button
-                        onClick={() =>
-                          ouvrirWhatsApp(
-                            v.telephone,
-                            `Bonjour${v.client ? " " + v.client : ""}, petit rappel concernant votre achat${v.article ? " de " + v.article : ""} du ${fmtDate(v.date)} d'un montant de ${fcfa(totalDe(v))}. Il reste ${fcfa(reste)} à régler. Merci !`
-                          )
-                        }
-                        title="Rappel de paiement sur WhatsApp"
-                        className="text-[#1F6F5C] hover:underline text-xs mr-2">WhatsApp</button>
-                    )}
-                    {st !== "paye" && (
-                      <button onClick={() => solder(v.id)} title="Marquer entièrement payé"
-                        className="text-[#1F6F5C] hover:underline text-xs mr-2">Soldé</button>
-                    )}
-                    <button onClick={() => remove(v)} title="Supprimer la ligne"
-                      className="text-[#C1652F] hover:underline text-sm">✕</button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="flex flex-col gap-3">
+        {filtered.length === 0 && (
+          <div className="bg-white border border-[#D8D2C2] rounded-sm p-6 bz-sans text-sm text-[#9AA0A6]">
+            {ventes.length === 0
+              ? "Aucune vente. Utilisez « ⚡ Vente rapide » pour un client de passage, ou « + Vente détaillée »."
+              : "Aucune vente ne correspond à ce filtre."}
+          </div>
+        )}
+        {filtered.map((v) => {
+          const st = statutDe(v);
+          const reste = resteDe(v);
+          const item = stock.find((s) => s.id === v.stockId);
+          return (
+            <div key={v.id} className="bg-white border border-[#D8D2C2] rounded-sm p-4"
+              style={{ borderLeftWidth: "4px", borderLeftColor: st === "paye" ? "#1F6F5C" : "#C1652F" }}>
+              <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <input type="date" className={inputCls + " bz-mono py-1.5"} value={v.date || ""}
+                    onChange={(e) => update(v.id, { date: e.target.value })} />
+                  <Tampon label={statutInfo[st].label} tone={statutInfo[st].tone} />
+                </div>
+                <button onClick={() => remove(v)} title="Supprimer la vente"
+                  className="text-[#C1652F] hover:underline text-sm">✕ Supprimer</button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Client">
+                  <input className={inputCls + " w-full"} placeholder="Nom du client" value={v.client || ""}
+                    onChange={(e) => update(v.id, { client: e.target.value })} />
+                </Field>
+                <Field label="Numéro">
+                  <input className={inputCls + " w-full bz-mono"} placeholder="Téléphone" value={v.telephone || ""}
+                    onChange={(e) => update(v.id, { telephone: e.target.value })} />
+                </Field>
+                <Field label="Article du stock">
+                  <select className={inputCls + " w-full"} value={v.stockId || ""} disabled={v.deduitStock}
+                    onChange={(e) => choisirStock(v, e.target.value)}>
+                    <option value="">— hors stock —</option>
+                    {stock.map((s) => <option key={s.id} value={s.id}>{s.nom}</option>)}
+                  </select>
+                </Field>
+                <Field label="Article vendu">
+                  <input className={inputCls + " w-full"} placeholder="Ce qui est vendu" value={v.article || ""}
+                    onChange={(e) => update(v.id, { article: e.target.value })} />
+                </Field>
+                <Field label="Qualité">
+                  <select className={inputCls + " w-full"} value={v.qualite || qualites[0]}
+                    onChange={(e) => update(v.id, { qualite: e.target.value })}>
+                    {qualites.map((q) => <option key={q} value={q}>{q}</option>)}
+                  </select>
+                </Field>
+                <Field label="Mode de paiement">
+                  <select className={inputCls + " w-full"} value={v.modePaiement || modesPaiement[0]}
+                    onChange={(e) => update(v.id, { modePaiement: e.target.value })}>
+                    {modesPaiement.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </Field>
+                <Field label="Métrage">
+                  <input type="number" min="0" step="0.5" className={inputCls + " w-full text-right bz-mono"} placeholder="0"
+                    value={v.metrage ?? ""} onChange={(e) => update(v.id, { metrage: e.target.value })} />
+                </Field>
+                <Field label="Prix / m">
+                  <input type="number" min="0" step="1" className={inputCls + " w-full text-right bz-mono"} placeholder="0"
+                    value={v.prixMetre ?? ""} onChange={(e) => update(v.id, { prixMetre: e.target.value })} />
+                </Field>
+                <Field label="Transport">
+                  <input type="number" min="0" step="1" className={inputCls + " w-full text-right bz-mono"} placeholder="0"
+                    value={v.transport ?? ""} onChange={(e) => update(v.id, { transport: e.target.value })} />
+                </Field>
+                <Field label="Montant payé">
+                  <input type="number" min="0" step="1" className={inputCls + " w-full text-right bz-mono"} placeholder="0"
+                    value={v.montantPaye ?? ""} onChange={(e) => update(v.id, { montantPaye: e.target.value })} />
+                </Field>
+              </div>
+
+              <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 pt-3 border-t border-[#EFEBDF] bz-sans text-sm">
+                <span>Total : <b className="bz-mono">{fcfa(totalDe(v))}</b></span>
+                <span>Bénéfice : {beneficeDe(v) === null
+                  ? <span className="text-[#9AA0A6]">—</span>
+                  : <b className={"bz-mono " + (beneficeDe(v) >= 0 ? "text-[#1F6F5C]" : "text-[#C1652F]")}>{fcfa(beneficeDe(v))}</b>}</span>
+                <span>Reste : <b className={"bz-mono " + (reste > 0 ? "text-[#C1652F]" : "text-[#9AA0A6]")}>{fcfa(reste)}</b></span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-4 mt-3">
+                {v.stockId && (
+                  <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+                    <input type="checkbox" checked={!!v.deduitStock} onChange={() => basculerDeduction(v)} />
+                    {v.deduitStock
+                      ? <span className="text-[#1F6F5C]">retiré du stock ({v.qteDeduit} m)</span>
+                      : <span className="text-[#5B5F55]">déduire du stock · reste {item ? item.quantite : "?"}</span>}
+                  </label>
+                )}
+                {st !== "paye" && (
+                  <button onClick={() => solder(v.id)} className="text-[#1F6F5C] hover:underline text-sm">Marquer payé</button>
+                )}
+                {reste > 0 && v.telephone && (
+                  <button onClick={() => ouvrirWhatsApp(v.telephone, `Bonjour${v.client ? " " + v.client : ""}, petit rappel concernant votre achat${v.article ? " de " + v.article : ""} du ${fmtDate(v.date)} d'un montant de ${fcfa(totalDe(v))}. Il reste ${fcfa(reste)} à régler. Merci !`)}
+                    className="text-[#25D366] hover:underline text-sm">Rappel WhatsApp</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
       <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
-        Écrivez directement dans les cases : tout est enregistré automatiquement. Le total et le reste à payer se calculent tout seuls.
-        Choisissez un « Article du stock » puis cochez « déduire » : la quantité vendue est retirée du stock (inventaire à jour en même temps que la vente).
-        Décochez pour rendre la quantité au stock. Les lignes en jaune clair ne sont pas encore entièrement payées.
+        Chaque vente est une fiche : écrivez dans les cases, tout s'enregistre automatiquement. Le total et le reste se calculent seuls.
+        Choisissez un « Article du stock » puis cochez « déduire » pour retirer la quantité vendue du stock. Le bord rouge à gauche = pas encore entièrement payé.
       </p>
     </div>
   );
