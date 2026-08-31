@@ -279,6 +279,14 @@ export default function BazinApp() {
             </button>
           ))}
         </nav>
+        <div className="px-3 pb-2">
+          <a
+            href="./studio.html"
+            className="block px-3 py-2 rounded-sm bz-sans text-sm text-[#D8D2C2] hover:bg-white/5"
+          >
+            Studio Images ↗
+          </a>
+        </div>
         <div className="px-6 py-4 border-t border-white/10 text-[11px] text-[#9AA0A6] bz-sans">
           Données enregistrées localement
         </div>
