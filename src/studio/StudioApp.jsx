@@ -730,12 +730,14 @@ export default function StudioApp() {
             {modele.nom} · {format} · {tailleEffective} · {nombre} image{nombre > 1 ? "s" : ""}
             {references.length > 0 && ` · ${references.length} référence${references.length > 1 ? "s" : ""}`}
           </div>
+          {/* Les clés distinctes évitent que React réutilise le même nœud :
+              sans elles, la couleur du bouton s'anime au lieu de basculer. */}
           {enCours ? (
-            <Bouton variante="neutre" onClick={interrompre}>
+            <Bouton key="interrompre" variante="neutre" onClick={interrompre}>
               Interrompre
             </Bouton>
           ) : (
-            <Bouton variante="principal" onClick={generer} className="px-6 py-2.5">
+            <Bouton key="generer" variante="principal" onClick={generer} className="px-6 py-2.5">
               {references.length ? "Retoucher" : "Générer"}
               <span className="st-mono ml-2 text-[11px] opacity-60">Ctrl ↵</span>
             </Bouton>
