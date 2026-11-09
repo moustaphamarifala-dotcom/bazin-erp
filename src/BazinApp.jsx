@@ -47,6 +47,59 @@ const productionCout = (p) => nbr(p.metrage) * (nbr(p.prixInitial) + nbr(p.prixT
 const dansMois = (dateStr, ym) => (dateStr || "").slice(0, 7) === ym;
 const moisCourant = () => today().slice(0, 7);
 
+/* ---- Teinture : délais, retards, ratés ---- */
+// Nombre de jours entre deux dates ISO (b − a), ou null si une date manque
+const joursEntre = (a, b) => {
+  if (!a || !b) return null;
+  const d = (new Date(b) - new Date(a)) / 86400000;
+  return Number.isFinite(d) ? Math.round(d) : null;
+};
+const DELAI_TEINTURE_DEFAUT = 7; // jours prévus par défaut pour un retour de teinture
+const ajouterJours = (iso, n) => {
+  const d = new Date(iso || today());
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+// Une teinture est en retard si elle n'est pas revenue et que la date de retour prévue est passée
+const teintureEnRetard = (t) => t.statut !== "renvoye" && !!t.retourPrevu && t.retourPrevu < today();
+const productionEnRetard = (p) => p.statut !== "termine" && !!p.retourPrevu && p.retourPrevu < today();
+const MODES_PAIEMENT_TEINT = ["Espèces", "Wave", "Orange Money", "Moov Money", "Virement", "Autre"];
+
+/* Performance d'un teinturier à partir de ses lignes (Teinturiers + Teinture entreprise) */
+function perfTeinturier(lignes, productions = []) {
+  const revenues = lignes.filter((t) => t.statut === "renvoye");
+  const delais = revenues.map((t) => joursEntre(t.date, t.dateRetour)).filter((d) => d !== null && d >= 0);
+  const delaisProd = productions
+    .filter((p) => p.statut === "termine")
+    .map((p) => joursEntre(p.date, p.dateFin))
+    .filter((d) => d !== null && d >= 0);
+  const tousDelais = [...delais, ...delaisProd];
+  const pieces = lignes.reduce((s, t) => s + nbr(t.quantite), 0);
+  const rates = lignes.reduce((s, t) => s + nbr(t.rates), 0);
+  const metresEnvoyes = productions.reduce((s, p) => s + nbr(p.metrage), 0);
+  const metresPerdus = productions
+    .filter((p) => p.metrageRecu !== "" && p.metrageRecu != null)
+    .reduce((s, p) => s + Math.max(0, nbr(p.metrage) - nbr(p.metrageRecu)), 0);
+  const prixTotal = lignes.reduce((s, t) => s + nbr(t.prix), 0);
+  const retards = lignes.filter(teintureEnRetard).length + productions.filter(productionEnRetard).length;
+  const delaiMoyen = tousDelais.length ? tousDelais.reduce((s, d) => s + d, 0) / tousDelais.length : null;
+  const tauxRates = pieces > 0 ? rates / pieces : 0;
+  const tauxPerte = metresEnvoyes > 0 ? metresPerdus / metresEnvoyes : 0;
+  // Score sur 100 : qualité (ratés/pertes) 50 pts, rapidité 30 pts, ponctualité 20 pts
+  const qualite = Math.max(0, 1 - (tauxRates + tauxPerte) * 5); // 10 % de ratés = 50 % des points perdus
+  const rapidite = delaiMoyen === null ? 0.5 : Math.max(0, Math.min(1, 1 - (delaiMoyen - 3) / 14));
+  const nbTotal = lignes.length + productions.length;
+  const ponctualite = nbTotal > 0 ? Math.max(0, 1 - retards / nbTotal) : 1;
+  const score = Math.round(qualite * 50 + rapidite * 30 + ponctualite * 20);
+  return {
+    delaiMoyen, tauxRates, tauxPerte, retards, pieces, rates, score,
+    coutPiece: pieces > 0 ? prixTotal / pieces : null,
+    nbTotal,
+  };
+}
+const pct = (x) => `${Math.round((x || 0) * 100)} %`;
+const scoreTone = (s) => (s >= 75 ? "#1F6F5C" : s >= 50 ? "#B9832F" : "#B23A2E");
+
 function exportCSV(filename, rows, headers) {
   const escape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const csv = [headers.map((h) => h.label).join(";"), ...rows.map((r) => headers.map((h) => escape(r[h.key])).join(";"))].join("\n");
@@ -100,7 +153,9 @@ function SearchBox({ value, onChange, placeholder }) {
 
 /* ============================================================ */
 export default function BazinApp() {
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTabState] = useState("dashboard");
+  const [menuOuvert, setMenuOuvert] = useState(false); // menu latéral sur téléphone
+  const setTab = (t) => { setTabState(t); setMenuOuvert(false); window.scrollTo?.(0, 0); };
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState("");
   const [printingDoc, setPrintingDoc] = useState(null);
@@ -221,7 +276,7 @@ export default function BazinApp() {
   }
 
   return (
-    <div className="min-h-screen flex bg-[#F0EDE4] text-[#1B2430]">
+    <div className="min-h-screen md:flex bg-[#F0EDE4] text-[#1B2430]">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
         .bz-serif { font-family: 'Fraunces', serif; }
@@ -241,8 +296,20 @@ export default function BazinApp() {
         <PrintView doc={printingDoc} clients={clients} onClose={() => setPrintingDoc(null)} />
       )}
 
+      {/* ---------- Barre du haut (téléphone) ---------- */}
+      <div className="md:hidden sticky top-0 z-30 bg-[#1B2430] text-[#F0EDE4] flex items-center justify-between px-4 py-3 bz-no-print">
+        <div className="bz-serif text-xl font-semibold">Bazin</div>
+        <button onClick={() => setMenuOuvert(true)} aria-label="Ouvrir le menu"
+          className="bz-sans text-sm border border-white/20 rounded-sm px-3 py-1.5">☰ Menu</button>
+      </div>
+      {menuOuvert && (
+        <div className="md:hidden fixed inset-0 z-40 bg-black/40" onClick={() => setMenuOuvert(false)} />
+      )}
+
       {/* ---------- Barre latérale ---------- */}
-      <aside className="w-60 shrink-0 bg-[#1B2430] text-[#F0EDE4] flex flex-col">
+      <aside className={`w-60 shrink-0 bg-[#1B2430] text-[#F0EDE4] flex flex-col
+        fixed inset-y-0 left-0 z-50 overflow-y-auto transition-transform md:static md:translate-x-0
+        ${menuOuvert ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="px-6 py-7 border-b border-white/10">
           <div className="bz-serif text-2xl font-semibold tracking-tight">Bazin</div>
           <div className="bz-mono text-[11px] text-[#9AA0A6] mt-1">Registre de gestion</div>
@@ -285,7 +352,7 @@ export default function BazinApp() {
       </aside>
 
       {/* ---------- Contenu ---------- */}
-      <main className="flex-1 px-10 py-8 overflow-y-auto">
+      <main className="flex-1 min-w-0 px-4 py-5 md:px-10 md:py-8 overflow-y-auto">
         {saveError && (
           <div className="mb-4 px-4 py-2 bg-[#F3E2D2] border border-[#C1652F] text-[#8A3F14] text-sm rounded-sm bz-sans">
             {saveError}
@@ -349,7 +416,7 @@ export default function BazinApp() {
           <DepensesView depenses={depenses} saveDepenses={saveDepenses} />
         )}
         {tab === "teintures" && (
-          <TeinturesView teintures={teintures} saveTeintures={saveTeintures} paiements={paiementsTeint} savePaiements={savePaiementsTeint} />
+          <TeinturesView teintures={teintures} saveTeintures={saveTeintures} paiements={paiementsTeint} savePaiements={savePaiementsTeint} productions={productions} />
         )}
         {tab === "commandes" && (
           <CommandesView commandes={commandes} saveCommandes={saveCommandes} />
@@ -492,7 +559,11 @@ function Dashboard({ clients, stock, lowStock, ventes, caisse, teintures, paieme
     { label: "Articles en stock", val: String(stock.length), dest: "stock", tone: lowStock.length > 0 ? "#C1652F" : "#1B2430" },
   ];
 
-  const rien = cmdUrgent.length === 0 && creditsAnciens.length === 0 && teinturiersAPayer.length === 0 && lowStock.length === 0;
+  const teinturesRetard = [
+    ...teintures.filter(teintureEnRetard).map((t) => ({ id: t.id, nom: (t.teinturier || "").trim() || "Sans nom", detail: `${t.quantite || "?"} × ${t.qualite || "bazin"}`, depuis: t.retourPrevu, dest: "teintures" })),
+    ...(productions || []).filter(productionEnRetard).map((p) => ({ id: p.id, nom: (p.teinturier || "").trim() || "Teinture entreprise", detail: `${p.metrage || "?"} m ${p.couleur || ""}`.trim(), depuis: p.retourPrevu, dest: "production" })),
+  ].sort((a, b) => (a.depuis < b.depuis ? -1 : 1));
+  const rien = cmdUrgent.length === 0 && creditsAnciens.length === 0 && teinturiersAPayer.length === 0 && lowStock.length === 0 && teinturesRetard.length === 0;
 
   return (
     <div>
@@ -569,6 +640,20 @@ function Dashboard({ clients, stock, lowStock, ventes, caisse, teintures, paieme
                       <span>{v.client || "Client"}<span className="text-[#9AA0A6]"> · depuis le {fmtDate(v.date)}</span></span>
                       <span className="flex gap-3"><span className="bz-mono text-[#C1652F]">{fcfa(venteReste(v))}</span>
                         <button onClick={() => setTab("rappels")} className="text-[#1F6F5C] hover:underline">Relancer</button></span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {teinturesRetard.length > 0 && (
+              <div>
+                <div className="bz-sans text-sm font-medium text-[#B23A2E] mb-1">Teintures en retard ({teinturesRetard.length})</div>
+                <ul className="flex flex-col gap-1">
+                  {teinturesRetard.slice(0, 6).map((r) => (
+                    <li key={r.id} className="bz-sans text-sm flex justify-between gap-2">
+                      <span>{r.nom}<span className="text-[#9AA0A6]"> · {r.detail}</span></span>
+                      <span className="flex gap-3"><span className="bz-mono text-[#B23A2E]">{joursEntre(r.depuis, today())} j</span>
+                        <button onClick={() => setTab(r.dest)} className="text-[#1F6F5C] hover:underline">Voir</button></span>
                     </li>
                   ))}
                 </ul>
@@ -1471,12 +1556,14 @@ function DepensesView({ depenses, saveDepenses }) {
 }
 
 /* ============================================================ */
-function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements }) {
+function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements, productions = [] }) {
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState(null); // nom du teinturier ouvert
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [montantPaie, setMontantPaie] = useState(""); // montant du paiement en cours de saisie
+  const [modePaie, setModePaie] = useState(MODES_PAIEMENT_TEINT[0]);
+  const [filtreLignes, setFiltreLignes] = useState("tous"); // tous | en_teinture | retard | renvoye
 
   const qualites = ["Vainqueur blanc", "Moins riche", "Riche", "Habillement homme", "Habillement femme"];
 
@@ -1488,7 +1575,7 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
   const teinturiers = useMemo(() => {
     const map = new Map();
     const ensure = (nom) => {
-      if (!map.has(nom)) map.set(nom, { nom, nb: 0, enTeinture: 0, total: 0, aPayer: 0, dejaPaye: 0 });
+      if (!map.has(nom)) map.set(nom, { nom, nb: 0, enTeinture: 0, retards: 0, total: 0, aPayer: 0, dejaPaye: 0 });
       return map.get(nom);
     };
     teintures.forEach((t) => {
@@ -1496,6 +1583,7 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
       e.nb += 1;
       e.total += Number(t.prix) || 0; // total dû = somme de tous les prix de teinture
       if (t.statut !== "renvoye") e.enTeinture += 1;
+      if (teintureEnRetard(t)) e.retards += 1;
     });
     // Les paiements archivés font apparaître le teinturier même sans lignes,
     // et donnent le total déjà payé (l'archive n'est jamais supprimée).
@@ -1504,9 +1592,19 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
       e.dejaPaye += Number(p.montant) || 0;
     });
     // Reste à payer = total dû − déjà payé (permet les paiements par étapes)
-    map.forEach((e) => { e.aPayer = Math.max(0, e.total - e.dejaPaye); });
+    map.forEach((e) => {
+      e.aPayer = Math.max(0, e.total - e.dejaPaye);
+      const memeNom = (x) => ((x.teinturier || "").trim() || "Sans nom").toLowerCase() === e.nom.toLowerCase();
+      e.perf = perfTeinturier(teintures.filter(memeNom), productions.filter(memeNom));
+    });
     return [...map.values()].sort((a, b) => a.nom.localeCompare(b.nom));
-  }, [teintures, paiements]);
+  }, [teintures, paiements, productions]);
+
+  const classement = useMemo(
+    () => teinturiers.filter((t) => t.perf.nbTotal > 0).sort((a, b) => b.perf.score - a.perf.score),
+    [teinturiers]
+  );
+  const lignesEnRetard = teintures.filter(teintureEnRetard);
 
   const teinturiersAffiches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1518,13 +1616,29 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
   const lignes = selection ? teintures.filter((t) => nomDe(t) === selection) : [];
 
   const update = (id, patch) =>
-    saveTeintures(teintures.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+    saveTeintures(teintures.map((t) => {
+      if (t.id !== id) return t;
+      const next = { ...t, ...patch };
+      // Date de retour notée automatiquement quand le bazin revient
+      if (patch.statut === "renvoye" && !t.dateRetour) next.dateRetour = today();
+      if (patch.statut === "en_teinture") next.dateRetour = "";
+      // Date de départ changée : on décale le retour prévu d'autant
+      if (patch.date && t.date && t.retourPrevu) {
+        const ecart = joursEntre(t.date, t.retourPrevu);
+        if (ecart !== null) next.retourPrevu = ajouterJours(patch.date, ecart);
+      }
+      return next;
+    }));
 
-  const addRow = (nomTeinturier) =>
+  const addRow = (nomTeinturier) => {
+    // Le délai prévu reprend le délai moyen réel du teinturier, sinon 7 jours
+    const perf = teinturiers.find((t) => t.nom === nomTeinturier)?.perf;
+    const delai = perf?.delaiMoyen != null ? Math.max(1, Math.round(perf.delaiMoyen)) : DELAI_TEINTURE_DEFAUT;
     saveTeintures([
       ...teintures,
-      { id: uid(), date: today(), teinturier: nomTeinturier, lancePar: "", qualite: qualites[0], quantite: "", prix: "", statut: "en_teinture", regle: false, datePaiement: "", notes: "" },
+      { id: uid(), date: today(), teinturier: nomTeinturier, lancePar: "", qualite: qualites[0], couleur: "", quantite: "", prix: "", rates: "", statut: "en_teinture", retourPrevu: ajouterJours(today(), delai), dateRetour: "", regle: false, datePaiement: "", notes: "" },
     ]);
+  };
 
   const remove = (id) => saveTeintures(teintures.filter((t) => t.id !== id));
 
@@ -1537,7 +1651,7 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
 
   // Enregistrer un paiement (partiel ou total) : le montant s'ajoute à l'archive
   // et le reste à payer diminue d'autant. On peut payer étape par étape.
-  const enregistrerPaiement = (nom, montant) => {
+  const enregistrerPaiement = (nom, montant, mode) => {
     const m = Number(montant) || 0;
     if (m <= 0) { alert("Entrez un montant à payer."); return false; }
     const reste = Math.max(0, totalDuTeinturier(nom) - totalPayeArchive(nom));
@@ -1545,9 +1659,16 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
       `Vous payez ${fcfa(m)} alors qu'il ne reste que ${fcfa(reste)} à payer. Continuer quand même ?`
     )) return false;
     if (savePaiements) {
-      savePaiements([...paiements, { id: uid(), teinturier: nom, date: today(), montant: m }]);
+      savePaiements([...paiements, { id: uid(), teinturier: nom, date: today(), montant: m, mode: mode || "" }]);
     }
     return true;
+  };
+
+  // Annuler un paiement saisi par erreur (avec confirmation)
+  const annulerPaiement = (p) => {
+    if (!savePaiements) return;
+    if (!window.confirm(`Annuler le paiement de ${fcfa(p.montant)} du ${fmtDate(p.date)} ? Le reste à payer augmentera d'autant.`)) return;
+    savePaiements(paiements.filter((x) => x.id !== p.id));
   };
 
   const creerTeinturier = (e) => {
@@ -1569,9 +1690,13 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
         { key: "teinturier", label: "Teinturier" },
         { key: "lancePar", label: "Commande lancée par" },
         { key: "qualite", label: "Qualité de bazin" },
+        { key: "couleur", label: "Couleur / motif" },
         { key: "quantite", label: "Quantité" },
+        { key: "rates", label: "Ratés / abîmés" },
         { key: "prix", label: "Prix teinture (F CFA)" },
+        { key: "retourPrevu", label: "Retour prévu" },
         { key: "statut", label: "Bazin renvoyé" },
+        { key: "dateRetour", label: "Date de retour" },
         { key: "regleTxt", label: "Payé" },
         { key: "datePaiement", label: "Date de paiement" },
         { key: "notes", label: "Notes" },
@@ -1592,22 +1717,30 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
       .filter((p) => (p.teinturier || "") === selection)
       .sort((a, b) => (a.date < b.date ? 1 : -1));
     const faire_paiement = (montant) => {
-      if (enregistrerPaiement(selection, montant)) setMontantPaie("");
+      if (enregistrerPaiement(selection, montant, modePaie)) setMontantPaie("");
     };
+    const perfSel = fiche?.perf;
+    const lignesAffichees = lignes.filter((t) =>
+      filtreLignes === "tous" ? true
+        : filtreLignes === "retard" ? teintureEnRetard(t)
+        : filtreLignes === "renvoye" ? t.statut === "renvoye"
+        : t.statut !== "renvoye"
+    );
     return (
       <div>
         <button onClick={() => setSelection(null)}
           className="bz-sans text-sm text-[#1F6F5C] mb-4 hover:underline">
           ← Tous les teinturiers
         </button>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h1 className="bz-serif text-3xl font-semibold">{selection}</h1>
             <p className="bz-sans text-[#5B5F55]">
               {fiche ? `${fiche.nb} ligne(s) · ${fiche.enTeinture} bazin(s) encore en teinture` : ""}
+              {fiche?.retards > 0 && <span className="text-[#B23A2E] font-medium"> · {fiche.retards} en retard</span>}
             </p>
           </div>
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-wrap gap-2 items-center">
             <button onClick={() => exportTeintures(lignes, `bazin-teinture-${selection}.csv`)}
               className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
               Exporter CSV
@@ -1619,8 +1752,36 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
           </div>
         </div>
 
+        {/* ---- Performance du teinturier ---- */}
+        {perfSel && perfSel.nbTotal > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
+            <div className="bg-white border rounded-sm px-4 py-3" style={{ borderColor: scoreTone(perfSel.score) }}>
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Note</div>
+              <div className="bz-mono text-2xl font-medium" style={{ color: scoreTone(perfSel.score) }}>{perfSel.score}/100</div>
+            </div>
+            <div className="bg-white border border-[#D8D2C2] rounded-sm px-4 py-3">
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Délai moyen</div>
+              <div className="bz-mono text-xl font-medium">{perfSel.delaiMoyen === null ? "—" : `${Math.round(perfSel.delaiMoyen)} j`}</div>
+            </div>
+            <div className="bg-white border border-[#D8D2C2] rounded-sm px-4 py-3">
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Ratés</div>
+              <div className="bz-mono text-xl font-medium" style={{ color: perfSel.tauxRates > 0.05 ? "#B23A2E" : undefined }}>
+                {perfSel.rates} · {pct(perfSel.tauxRates)}
+              </div>
+            </div>
+            <div className="bg-white border border-[#D8D2C2] rounded-sm px-4 py-3">
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Coût / pièce</div>
+              <div className="bz-mono text-xl font-medium">{perfSel.coutPiece === null ? "—" : fcfa(perfSel.coutPiece)}</div>
+            </div>
+            <div className="bg-white border border-[#D8D2C2] rounded-sm px-4 py-3">
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Retards (+ entreprise)</div>
+              <div className="bz-mono text-xl font-medium" style={{ color: perfSel.retards > 0 ? "#B23A2E" : "#1F6F5C" }}>{perfSel.retards}</div>
+            </div>
+          </div>
+        )}
+
         {/* ---- Compte courant + paiement par étapes ---- */}
-        <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div className="bg-white border border-[#C1652F] rounded-sm px-5 py-4">
             <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Reste à payer</div>
             <div className="bz-mono text-2xl font-medium text-[#C1652F] mb-2">{fcfa(aPayerSel)}</div>
@@ -1633,6 +1794,10 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
                 Payer
               </button>
             </div>
+            <select className={inputCls + " w-full py-1.5 mt-2 text-sm"} value={modePaie}
+              onChange={(e) => setModePaie(e.target.value)}>
+              {MODES_PAIEMENT_TEINT.map((m) => <option key={m} value={m}>Payé par {m}</option>)}
+            </select>
             {aPayerSel > 0 && (
               <button onClick={() => faire_paiement(aPayerSel)}
                 className="bz-sans text-xs text-[#1F6F5C] mt-1.5 hover:underline">
@@ -1672,16 +1837,21 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
                   <th className="py-2">Date du paiement</th>
-                  <th className="py-2">Bazins réglés</th>
+                  <th className="py-2">Mode</th>
                   <th className="py-2 text-right">Montant payé</th>
+                  <th className="py-2 w-10"></th>
                 </tr>
               </thead>
               <tbody>
                 {archiveSel.map((p) => (
                   <tr key={p.id} className="border-b border-[#EFEBDF] last:border-0">
                     <td className="py-2 bz-mono">{fmtDate(p.date)}</td>
-                    <td className="py-2 text-[#5B5F55]">{p.nb || "—"}</td>
+                    <td className="py-2 text-[#5B5F55]">{p.mode || "—"}</td>
                     <td className="py-2 text-right bz-mono">{fcfa(p.montant)}</td>
+                    <td className="py-2 text-center">
+                      <button onClick={() => annulerPaiement(p)} title="Annuler ce paiement (erreur de saisie)"
+                        className="text-[#C1652F] hover:underline text-sm px-2">✕</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1706,31 +1876,50 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
           </div>
         )}
 
+        <div className="flex flex-wrap gap-2 mb-3">
+          {[
+            ["tous", `Tout (${lignes.length})`],
+            ["en_teinture", `En teinture (${lignes.filter((t) => t.statut !== "renvoye").length})`],
+            ["retard", `En retard (${lignes.filter(teintureEnRetard).length})`],
+            ["renvoye", `Revenus (${lignes.filter((t) => t.statut === "renvoye").length})`],
+          ].map(([k, label]) => (
+            <button key={k} onClick={() => setFiltreLignes(k)}
+              className={`bz-sans text-sm px-3 py-1.5 rounded-sm border ${filtreLignes === k ? "bg-[#1B2430] text-white border-[#1B2430]" : "bg-white border-[#D8D2C2] hover:border-[#1F6F5C]"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
-          <table className="w-full text-sm bz-sans" style={{ minWidth: "860px" }}>
+          <table className="w-full text-sm bz-sans" style={{ minWidth: "1280px" }}>
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
-                <th className="px-3 py-3 w-36">Date</th>
+                <th className="px-3 py-3 w-36">Départ</th>
                 <th className="px-3 py-3">Lancée par</th>
                 <th className="px-3 py-3 w-44">Qualité de bazin</th>
+                <th className="px-3 py-3">Couleur / motif</th>
                 <th className="px-3 py-3 w-20">Qté</th>
                 <th className="px-3 py-3 w-32">Prix (F CFA)</th>
+                <th className="px-3 py-3 w-36">Retour prévu</th>
                 <th className="px-3 py-3 w-32">Renvoyé ?</th>
+                <th className="px-3 py-3 w-20">Ratés</th>
                 <th className="px-3 py-3">Notes</th>
                 <th className="px-3 py-3 w-10"></th>
               </tr>
             </thead>
             <tbody>
-              {lignes.length === 0 && (
+              {lignesAffichees.length === 0 && (
                 <tr>
-                  <td colSpan="8" className="px-5 py-6 text-[#9AA0A6]">
-                    Aucune ligne. Cliquez sur « + Ajouter une ligne » et remplissez les cases directement, comme dans Excel.
+                  <td colSpan="11" className="px-5 py-6 text-[#9AA0A6]">
+                    {lignes.length === 0
+                      ? "Aucune ligne. Cliquez sur « + Ajouter une ligne » et remplissez les cases directement, comme dans Excel."
+                      : "Aucune ligne dans ce filtre."}
                   </td>
                 </tr>
               )}
-              {lignes.map((t) => (
+              {lignesAffichees.map((t) => (
                 <tr key={t.id}
-                  className={`border-b border-[#EFEBDF] last:border-0 ${t.statut === "renvoye" ? "" : "bg-[#FDF8EF]"}`}>
+                  className={`border-b border-[#EFEBDF] last:border-0 ${teintureEnRetard(t) ? "bg-[#FBE9E5]" : t.statut === "renvoye" ? "" : "bg-[#FDF8EF]"}`}>
                   <td className="px-1 py-1">
                     <input type="date" className={cellText + " bz-mono"} value={t.date || ""}
                       onChange={(e) => update(t.id, { date: e.target.value })} />
@@ -1746,6 +1935,10 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
                     </select>
                   </td>
                   <td className="px-1 py-1">
+                    <input className={cellText} placeholder="ex. bleu roi, bogolan…" value={t.couleur || ""}
+                      onChange={(e) => update(t.id, { couleur: e.target.value })} />
+                  </td>
+                  <td className="px-1 py-1">
                     <input type="number" min="0" step="1" className={cellText + " bz-mono text-right"} placeholder="0"
                       value={t.quantite ?? ""}
                       onChange={(e) => update(t.id, { quantite: e.target.value })} />
@@ -1756,6 +1949,16 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
                       onChange={(e) => update(t.id, { prix: e.target.value })} />
                   </td>
                   <td className="px-1 py-1">
+                    <input type="date" className={cellText + " bz-mono" + (teintureEnRetard(t) ? " text-[#B23A2E] font-medium" : "")}
+                      value={t.retourPrevu || ""}
+                      onChange={(e) => update(t.id, { retourPrevu: e.target.value })} />
+                    {teintureEnRetard(t) && (
+                      <div className="bz-sans text-[11px] text-[#B23A2E] px-2">
+                        {joursEntre(t.retourPrevu, today())} j de retard
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-1 py-1">
                     <select
                       className={cellSelect + (t.statut === "renvoye" ? " text-[#1F6F5C] font-medium" : " text-[#B9832F] font-medium")}
                       value={t.statut || "en_teinture"}
@@ -1763,6 +1966,16 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
                       <option value="en_teinture">Non</option>
                       <option value="renvoye">Oui</option>
                     </select>
+                    {t.statut === "renvoye" && t.dateRetour && (
+                      <div className="bz-sans text-[11px] text-[#5B5F55] px-2">
+                        le {fmtDate(t.dateRetour)}{joursEntre(t.date, t.dateRetour) !== null ? ` · ${joursEntre(t.date, t.dateRetour)} j` : ""}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-1 py-1">
+                    <input type="number" min="0" step="1" className={cellText + " bz-mono text-right" + (nbr(t.rates) > 0 ? " text-[#B23A2E]" : "")}
+                      placeholder="0" value={t.rates ?? ""}
+                      onChange={(e) => update(t.id, { rates: e.target.value })} />
                   </td>
                   <td className="px-1 py-1">
                     <input className={cellText} value={t.notes || ""}
@@ -1778,7 +1991,8 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
           </table>
         </div>
         <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
-          Écrivez directement dans les cases : tout est enregistré automatiquement. Les lignes en jaune clair sont les bazins encore en teinture.
+          Écrivez directement dans les cases : tout est enregistré automatiquement. Les lignes en jaune clair sont les bazins encore en teinture, en rouge ceux qui ont dépassé la date de retour prévue.
+          Quand vous passez « Renvoyé ? » à Oui, la date de retour est notée et le délai calculé. Notez les pièces ratées ou abîmées dans « Ratés » : elles comptent dans la note du teinturier.
           Pour payer le teinturier, entrez le montant versé (une partie ou tout) dans « Reste à payer » puis « Payer » — vous pouvez payer par étapes. Chaque versement s'ajoute à l'archive et le reste à payer diminue d'autant.
         </p>
       </div>
@@ -1788,7 +2002,7 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
   /* ---- Liste des teinturiers ---- */
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="bz-serif text-3xl font-semibold">Teinturiers</h1>
           <p className="bz-sans text-[#5B5F55]">
@@ -1796,7 +2010,7 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
             {" · "}total payé (paiements extérieurs) : <span className="bz-mono font-medium text-[#1F6F5C]">{fcfa(totalPayeGlobal)}</span>
           </p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           <SearchBox value={query} onChange={setQuery} placeholder="Rechercher un teinturier…" />
           <button onClick={() => exportTeintures(teintures, "bazin-teintures.csv")}
             className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
@@ -1825,6 +2039,66 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
         </form>
       )}
 
+      {/* ---- Alertes retard ---- */}
+      {lignesEnRetard.length > 0 && (
+        <div className="bg-[#FBE9E5] border border-[#B23A2E] rounded-sm p-4 mb-6">
+          <div className="bz-sans text-sm font-medium text-[#8A2A20] mb-2">
+            ⚠ {lignesEnRetard.length} teinture(s) en retard — à relancer
+          </div>
+          <div className="flex flex-col gap-1">
+            {lignesEnRetard
+              .sort((a, b) => (a.retourPrevu < b.retourPrevu ? -1 : 1))
+              .slice(0, 6)
+              .map((t) => (
+                <div key={t.id} className="bz-sans text-sm flex flex-wrap justify-between gap-2">
+                  <span>
+                    <b>{nomDe(t)}</b> · {t.quantite || "?"} × {t.qualite}{t.couleur ? ` ${t.couleur}` : ""}
+                    <span className="text-[#B23A2E]"> · {joursEntre(t.retourPrevu, today())} j de retard</span>
+                  </span>
+                  <button onClick={() => setSelection(nomDe(t))} className="text-[#1F6F5C] hover:underline">Ouvrir</button>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* ---- Classement des teinturiers ---- */}
+      {classement.length > 1 && !query && (
+        <div className="bg-white border border-[#D8D2C2] rounded-sm p-5 mb-6 overflow-x-auto">
+          <h2 className="bz-serif text-lg font-semibold mb-1">Classement des teinturiers</h2>
+          <p className="bz-sans text-xs text-[#9AA0A6] mb-3">
+            Note sur 100 : qualité (ratés et pertes) 50 pts, rapidité 30 pts, respect des délais 20 pts. Donnez vos gros lots aux mieux notés.
+          </p>
+          <table className="w-full text-sm bz-sans" style={{ minWidth: "560px" }}>
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+                <th className="py-2">#</th>
+                <th className="py-2">Teinturier</th>
+                <th className="py-2 text-right">Note</th>
+                <th className="py-2 text-right">Délai moyen</th>
+                <th className="py-2 text-right">Ratés</th>
+                <th className="py-2 text-right">Coût / pièce</th>
+                <th className="py-2 text-right">Retards</th>
+              </tr>
+            </thead>
+            <tbody>
+              {classement.map((t, i) => (
+                <tr key={t.nom} onClick={() => setSelection(t.nom)}
+                  className="border-b border-[#EFEBDF] last:border-0 cursor-pointer hover:bg-[#FAF8F2]">
+                  <td className="py-2 bz-mono">{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}</td>
+                  <td className="py-2 font-medium">{t.nom}</td>
+                  <td className="py-2 text-right bz-mono font-medium" style={{ color: scoreTone(t.perf.score) }}>{t.perf.score}</td>
+                  <td className="py-2 text-right bz-mono">{t.perf.delaiMoyen === null ? "—" : `${Math.round(t.perf.delaiMoyen)} j`}</td>
+                  <td className="py-2 text-right bz-mono">{pct(t.perf.tauxRates + t.perf.tauxPerte)}</td>
+                  <td className="py-2 text-right bz-mono">{t.perf.coutPiece === null ? "—" : fcfa(t.perf.coutPiece)}</td>
+                  <td className="py-2 text-right bz-mono" style={{ color: t.perf.retards > 0 ? "#B23A2E" : undefined }}>{t.perf.retards}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {teinturiersAffiches.length === 0 ? (
         <div className="bg-white border border-[#D8D2C2] rounded-sm p-6">
           <p className="bz-sans text-sm text-[#9AA0A6]">
@@ -1834,13 +2108,21 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {teinturiersAffiches.map((t) => (
             <button key={t.nom} onClick={() => setSelection(t.nom)}
               className="text-left bg-white border border-[#D8D2C2] rounded-sm p-5 hover:border-[#1F6F5C] transition-colors">
-              <div className="bz-serif text-lg font-semibold mb-1">{t.nom}</div>
-              <div className="bz-sans text-sm text-[#5B5F55]">{t.nb} ligne(s)</div>
+              <div className="flex items-baseline justify-between gap-2 mb-1">
+                <div className="bz-serif text-lg font-semibold">{t.nom}</div>
+                {t.perf.nbTotal > 0 && (
+                  <span className="bz-mono text-sm font-medium" style={{ color: scoreTone(t.perf.score) }}>{t.perf.score}/100</span>
+                )}
+              </div>
+              <div className="bz-sans text-sm text-[#5B5F55]">
+                {t.nb} ligne(s){t.perf.delaiMoyen !== null ? ` · délai moyen ${Math.round(t.perf.delaiMoyen)} j` : ""}
+              </div>
               <div className="bz-sans text-sm mb-2">
+                {t.retards > 0 && <span className="text-[#B23A2E] font-medium">{t.retards} en retard · </span>}
                 {t.enTeinture > 0 ? (
                   <span className="text-[#B9832F]">{t.enTeinture} encore en teinture</span>
                 ) : (
@@ -3010,6 +3292,15 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
 
   const coutMetre = (p) => (Number(p.prixInitial) || 0) + (Number(p.prixTapage) || 0);
   const totalDe = (p) => (Number(p.metrage) || 0) * coutMetre(p);
+  // Métrage réellement revenu (si rempli), sinon le métrage envoyé
+  const aMetrageRecu = (p) => p.metrageRecu !== "" && p.metrageRecu != null;
+  const metrageUtile = (p) => (aMetrageRecu(p) ? Number(p.metrageRecu) || 0 : Number(p.metrage) || 0);
+  const perteDe = (p) => (aMetrageRecu(p) ? Math.max(0, (Number(p.metrage) || 0) - (Number(p.metrageRecu) || 0)) : 0);
+  // Coût réel par mètre vendable : le coût total réparti sur ce qui est vraiment revenu
+  const coutReelMetre = (p) => {
+    const m = metrageUtile(p);
+    return m > 0 ? totalDe(p) / m : coutMetre(p);
+  };
 
   // Nom de l'article une fois teint, tel qu'il entrera dans le stock
   const nomArticle = (p) => {
@@ -3028,9 +3319,24 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
 
   const enCours = productions.filter((p) => p.statut !== "termine").length;
   const totalCout = filtered.reduce((s, p) => s + totalDe(p), 0);
+  const enRetard = productions.filter(productionEnRetard);
+  const terminees = productions.filter((p) => p.statut === "termine");
+  const delais = terminees.map((p) => joursEntre(p.date, p.dateFin)).filter((d) => d !== null && d >= 0);
+  const delaiMoyen = delais.length ? delais.reduce((a, b) => a + b, 0) / delais.length : null;
+  const mEnvoyes = productions.filter(aMetrageRecu).reduce((s, p) => s + nbr(p.metrage), 0);
+  const mPerdus = productions.reduce((s, p) => s + perteDe(p), 0);
+  const tauxPerte = mEnvoyes > 0 ? mPerdus / mEnvoyes : 0;
+  const mUtiles = terminees.reduce((s, p) => s + metrageUtile(p), 0);
+  const coutMoyenMetre = mUtiles > 0 ? terminees.reduce((s, p) => s + totalDe(p), 0) / mUtiles : null;
 
   const update = (id, patch) =>
-    saveProductions(productions.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    saveProductions(productions.map((p) => {
+      if (p.id !== id) return p;
+      const next = { ...p, ...patch };
+      if (patch.statut === "termine" && !p.dateFin) next.dateFin = today();
+      if (patch.statut === "en_cours") next.dateFin = "";
+      return next;
+    }));
 
   const addRow = () =>
     saveProductions([
@@ -3045,6 +3351,9 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
         prixInitial: "",
         prixTapage: "",
         statut: "en_cours",
+        retourPrevu: ajouterJours(today(), DELAI_TEINTURE_DEFAUT),
+        dateFin: "",
+        metrageRecu: "",
         enStock: false,
         qteEntree: 0,
         stockId: "",
@@ -3070,27 +3379,28 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
       update(p.id, { enStock: false, qteEntree: 0, stockId: "" });
       return;
     }
-    const qte = Number(p.metrage) || 0;
+    // On entre en stock ce qui est réellement revenu (métrage reçu), sinon le métrage envoyé
+    const qte = metrageUtile(p);
     if (qte <= 0) {
-      alert("Indiquez d'abord le métrage avant d'entrer en stock.");
+      alert("Indiquez d'abord le métrage (envoyé ou reçu) avant d'entrer en stock.");
       return;
     }
     const nom = nomArticle(p);
     const existant = stock.find((s) => (s.nom || "").toLowerCase() === nom.toLowerCase());
     if (existant) {
       saveStock(stock.map((s) => (s.id === existant.id ? { ...s, quantite: (Number(s.quantite) || 0) + qte } : s)));
-      update(p.id, { enStock: true, qteEntree: qte, stockId: existant.id, statut: "termine" });
+      update(p.id, { enStock: true, qteEntree: qte, stockId: existant.id, statut: "termine", dateFin: p.dateFin || today() });
     } else {
       const nouvel = {
         id: uid(),
         nom,
         quantite: qte,
-        prixUnitaire: coutMetre(p),
+        prixUnitaire: Math.round(coutReelMetre(p)),
         seuilAlerte: 0,
         fournisseurId: "",
       };
       saveStock([...stock, nouvel]);
-      update(p.id, { enStock: true, qteEntree: qte, stockId: nouvel.id, statut: "termine" });
+      update(p.id, { enStock: true, qteEntree: qte, stockId: nouvel.id, statut: "termine", dateFin: p.dateFin || today() });
     }
   };
 
@@ -3100,6 +3410,8 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
       productions.map((p) => ({
         ...p,
         total: totalDe(p),
+        perte: perteDe(p),
+        coutReel: Math.round(coutReelMetre(p)),
         statut: p.statut === "termine" ? "Terminé" : "En cours",
         enStock: p.enStock ? "Oui" : "Non",
         article: nomArticle(p),
@@ -3113,6 +3425,11 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
         { key: "prixInitial", label: "Prix initial / m (F CFA)" },
         { key: "prixTapage", label: "Prix tapage / m (F CFA)" },
         { key: "total", label: "Coût total (F CFA)" },
+        { key: "retourPrevu", label: "Retour prévu" },
+        { key: "dateFin", label: "Date de retour" },
+        { key: "metrageRecu", label: "Métrage reçu (m)" },
+        { key: "perte", label: "Perte (m)" },
+        { key: "coutReel", label: "Coût réel / m vendable (F CFA)" },
         { key: "statut", label: "Statut" },
         { key: "article", label: "Article en stock" },
         { key: "enStock", label: "Entré en stock" },
@@ -3122,14 +3439,14 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
         <div>
           <h1 className="bz-serif text-3xl font-semibold">Teinture entreprise</h1>
           <p className="bz-sans text-[#5B5F55]">
             {productions.length} teinture(s) · {enCours} en cours · coût total : <span className="bz-mono">{fcfa(totalCout)}</span>
           </p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           <SearchBox value={query} onChange={setQuery} placeholder="Rechercher…" />
           <button onClick={exporter}
             className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
@@ -3145,8 +3462,32 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
         Votre bazin blanc part en teinture pour l'entreprise. Une fois terminé, cochez « en stock » : le bazin teint entre directement dans votre stock, prêt à vendre.
       </p>
 
+      {/* ---- Performance de la production ---- */}
+      {productions.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+          <div className="bg-white border rounded-sm px-4 py-3" style={{ borderColor: enRetard.length ? "#B23A2E" : "#D8D2C2" }}>
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">En retard</div>
+            <div className="bz-mono text-xl font-medium" style={{ color: enRetard.length ? "#B23A2E" : "#1F6F5C" }}>{enRetard.length}</div>
+          </div>
+          <div className="bg-white border border-[#D8D2C2] rounded-sm px-4 py-3">
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Délai moyen</div>
+            <div className="bz-mono text-xl font-medium">{delaiMoyen === null ? "—" : `${Math.round(delaiMoyen)} j`}</div>
+          </div>
+          <div className="bg-white border border-[#D8D2C2] rounded-sm px-4 py-3">
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Perte au retour</div>
+            <div className="bz-mono text-xl font-medium" style={{ color: tauxPerte > 0.03 ? "#B23A2E" : undefined }}>
+              {mPerdus ? `${mPerdus} m · ` : ""}{pct(tauxPerte)}
+            </div>
+          </div>
+          <div className="bg-white border border-[#D8D2C2] rounded-sm px-4 py-3">
+            <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Coût réel / m</div>
+            <div className="bz-mono text-xl font-medium">{coutMoyenMetre === null ? "—" : fcfa(coutMoyenMetre)}</div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white border border-[#D8D2C2] rounded-sm overflow-x-auto">
-        <table className="w-full text-sm bz-sans" style={{ minWidth: "1360px" }}>
+        <table className="w-full text-sm bz-sans" style={{ minWidth: "1720px" }}>
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
               <th className="px-3 py-3 w-36">Date</th>
@@ -3157,7 +3498,10 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
               <th className="px-3 py-3 w-28">Prix initial / m</th>
               <th className="px-3 py-3 w-28">Prix tapage / m</th>
               <th className="px-3 py-3 w-28 text-right">Coût total</th>
+              <th className="px-3 py-3 w-36">Retour prévu</th>
               <th className="px-3 py-3 w-28">Statut</th>
+              <th className="px-3 py-3 w-24">Reçu (m)</th>
+              <th className="px-3 py-3 w-28 text-right">Coût réel / m</th>
               <th className="px-3 py-3 w-52">Stock entreprise</th>
               <th className="px-3 py-3 w-10"></th>
             </tr>
@@ -3165,7 +3509,7 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="11" className="px-5 py-6 text-[#9AA0A6]">
+                <td colSpan="14" className="px-5 py-6 text-[#9AA0A6]">
                   {productions.length === 0
                     ? "Aucune teinture. Cliquez sur « + Nouvelle teinture » et remplissez les cases directement, comme dans Excel."
                     : "Aucun résultat pour cette recherche."}
@@ -3174,7 +3518,7 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
             )}
             {filtered.map((p) => (
               <tr key={p.id}
-                className={`border-b border-[#EFEBDF] last:border-0 ${p.statut === "termine" ? "" : "bg-[#FDF8EF]"}`}>
+                className={`border-b border-[#EFEBDF] last:border-0 ${productionEnRetard(p) ? "bg-[#FBE9E5]" : p.statut === "termine" ? "" : "bg-[#FDF8EF]"}`}>
                 <td className="px-1 py-1">
                   <input type="date" className={cellText + " bz-mono"} value={p.date || ""}
                     onChange={(e) => update(p.id, { date: e.target.value })} />
@@ -3212,6 +3556,14 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
                 </td>
                 <td className="px-3 py-1 bz-mono text-right whitespace-nowrap font-medium">{fcfa(totalDe(p))}</td>
                 <td className="px-1 py-1">
+                  <input type="date" className={cellText + " bz-mono" + (productionEnRetard(p) ? " text-[#B23A2E] font-medium" : "")}
+                    value={p.retourPrevu || ""}
+                    onChange={(e) => update(p.id, { retourPrevu: e.target.value })} />
+                  {productionEnRetard(p) && (
+                    <div className="bz-sans text-[11px] text-[#B23A2E] px-2">{joursEntre(p.retourPrevu, today())} j de retard</div>
+                  )}
+                </td>
+                <td className="px-1 py-1">
                   <select
                     className={cellSelect + (p.statut === "termine" ? " text-[#1F6F5C] font-medium" : " text-[#B9832F] font-medium")}
                     value={p.statut || "en_cours"}
@@ -3219,7 +3571,20 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
                     <option value="en_cours">En cours</option>
                     <option value="termine">Terminé</option>
                   </select>
+                  {p.statut === "termine" && p.dateFin && (
+                    <div className="bz-sans text-[11px] text-[#5B5F55] px-2">
+                      le {fmtDate(p.dateFin)}{joursEntre(p.date, p.dateFin) !== null ? ` · ${joursEntre(p.date, p.dateFin)} j` : ""}
+                    </div>
+                  )}
                 </td>
+                <td className="px-1 py-1">
+                  <input type="number" min="0" step="0.5" className={cellText + " bz-mono text-right" + (perteDe(p) > 0 ? " text-[#B23A2E]" : "")}
+                    placeholder={p.metrage || "0"} value={p.metrageRecu ?? ""} disabled={p.enStock}
+                    title="Métrage réellement revenu de la teinture"
+                    onChange={(e) => update(p.id, { metrageRecu: e.target.value })} />
+                  {perteDe(p) > 0 && <div className="bz-sans text-[11px] text-[#B23A2E] px-2">−{perteDe(p)} m perdus</div>}
+                </td>
+                <td className="px-3 py-1 bz-mono text-right whitespace-nowrap">{fcfa(coutReelMetre(p))}</td>
                 <td className="px-2 py-1 text-xs whitespace-nowrap">
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" checked={!!p.enStock} onChange={() => basculerStock(p)} />
@@ -3240,7 +3605,8 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
       <p className="bz-sans text-xs text-[#9AA0A6] mt-3">
         Le « prix initial » (bazin blanc + teinture) et le « prix tapage » sont vos coûts par mètre : le coût total = métrage × (prix initial + prix tapage).
         Quand vous cochez « entrer en stock », le métrage est ajouté à un article « {"{qualité}"} teint {"{couleur}"} » dans l'onglet Stock (créé automatiquement s'il n'existe pas encore),
-        avec ce coût par mètre comme prix de départ. Décochez pour annuler l'entrée en stock.
+        avec le coût réel par mètre comme prix de départ. Décochez pour annuler l'entrée en stock.
+        Remplissez « Reçu (m) » au retour : seul le métrage réellement revenu entre en stock, la perte est affichée en rouge et le coût réel par mètre vendable est recalculé.
       </p>
     </div>
   );
