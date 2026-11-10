@@ -320,6 +320,7 @@ export default function BazinApp() {
         <nav className="flex-1 px-3 py-4 flex flex-col gap-1">
           {[
             ["dashboard", "Tableau de bord"],
+            ["croissance", "Croissance"],
             ["bilan", "Bilan & bénéfice"],
             ["comptabilite", "Comptabilité"],
             ["businessplan", "Business plan"],
@@ -380,6 +381,10 @@ export default function BazinApp() {
             productions={productions}
             setTab={setTab}
           />
+        )}
+        {tab === "croissance" && (
+          <CroissanceView ventes={ventes} caisse={caisse} depenses={depenses} paiementsTeint={paiementsTeint}
+            productions={productions} stock={stock} teintures={teintures} setTab={setTab} />
         )}
         {tab === "bilan" && (
           <BilanView
@@ -3620,6 +3625,424 @@ function ProductionView({ productions, saveProductions, stock, saveStock }) {
 }
 
 /* ============================================================ */
+/* ============================================================ */
+/* Croissance : conseils calculés à partir de vos propres chiffres */
+/* ============================================================ */
+function CroissanceView({ ventes, caisse, depenses, paiementsTeint = [], productions, stock, teintures = [], setTab }) {
+  const [periode, setPeriode] = useState(30); // jours analysés
+
+  const a = useMemo(() => {
+    const jour = today();
+    const debut = ajouterJours(jour, -periode);
+    const debutPrec = ajouterJours(jour, -2 * periode);
+    const dans = (d, de, a2) => !!d && d > de && d <= a2;
+    const dateTicket = (t) => (t.dateTime || "").slice(0, 10);
+
+    // ---- Chiffre d'affaires et bénéfice : période actuelle contre période précédente ----
+    const bilan = (de, a2) => {
+      const vs = ventes.filter((v) => dans(v.date, de, a2));
+      const rVentes = vs.reduce((s, v) => s + venteTotal(v), 0);
+      const rCaisse = caisse.filter((t) => dans(dateTicket(t), de, a2)).reduce((s, t) => s + ticketTotal(t), 0);
+      const charges =
+        depenses.filter((d) => dans(d.date, de, a2)).reduce((s, d) => s + nbr(d.montant), 0) +
+        paiementsTeint.filter((p) => dans(p.date, de, a2)).reduce((s, p) => s + nbr(p.montant), 0) +
+        productions.filter((p) => dans(p.date, de, a2)).reduce((s, p) => s + productionCout(p), 0);
+      const ca = rVentes + rCaisse;
+      return { ca, charges, benefice: ca - charges, nbVentes: vs.length, panier: vs.length ? rVentes / vs.length : 0 };
+    };
+    const actuel = bilan(debut, jour);
+    const precedent = bilan(debutPrec, debut);
+    const evol = precedent.ca > 0 ? (actuel.ca - precedent.ca) / precedent.ca : null;
+
+    const vPeriode = ventes.filter((v) => dans(v.date, debut, jour));
+
+    // ---- Meilleures ventes par qualité et par article ----
+    const grouper = (cle) => {
+      const m = new Map();
+      vPeriode.forEach((v) => {
+        const k = (cle(v) || "").trim() || "Non précisé";
+        const e = m.get(k) || { nom: k, ca: 0, metres: 0, nb: 0 };
+        e.ca += venteArticles(v); e.metres += nbr(v.metrage); e.nb += 1;
+        m.set(k, e);
+      });
+      return [...m.values()].sort((x, y) => y.ca - x.ca);
+    };
+    const parQualite = grouper((v) => v.qualite);
+    const parArticle = grouper((v) => v.article);
+    const caArticles = vPeriode.reduce((s, v) => s + venteArticles(v), 0);
+
+    // ---- Stock : ce qui dort et ce qui va manquer ----
+    const cleStock = (v) => v.stockId || (v.article || "").trim().toLowerCase();
+    const vendus = new Map(); // mètres vendus sur la période, par article du stock
+    const derniere = new Map(); // date de la dernière vente, par article du stock
+    ventes.forEach((v) => {
+      const k = cleStock(v);
+      if (!k) return;
+      if (dans(v.date, debut, jour)) vendus.set(k, (vendus.get(k) || 0) + nbr(v.metrage));
+      if (v.date && (!derniere.get(k) || v.date > derniere.get(k))) derniere.set(k, v.date);
+    });
+    const lire = (map, s) => map.get(s.id) ?? map.get((s.nom || "").trim().toLowerCase());
+    const seuilDort = ajouterJours(jour, -60);
+    const dort = stock
+      .filter((s) => nbr(s.quantite) > 0)
+      .map((s) => ({ ...s, derniereVente: lire(derniere, s) || "", valeur: nbr(s.quantite) * nbr(s.prixUnitaire) }))
+      .filter((s) => !s.derniereVente || s.derniereVente < seuilDort)
+      .sort((x, y) => y.valeur - x.valeur);
+    const valeurDort = dort.reduce((s, x) => s + x.valeur, 0);
+    const aRecommander = stock
+      .map((s) => {
+        const v = lire(vendus, s) || 0;
+        const parJour = v / periode;
+        return { ...s, vendu: v, joursRestants: parJour > 0 ? nbr(s.quantite) / parJour : null };
+      })
+      .filter((s) => s.vendu > 0 && s.joursRestants !== null && s.joursRestants < 14)
+      .sort((x, y) => x.joursRestants - y.joursRestants);
+
+    // ---- Clients : meilleurs, à relancer, crédits ----
+    const clientsMap = new Map();
+    ventes.forEach((v) => {
+      const nom = (v.client || "").trim();
+      if (!nom || nom.toLowerCase() === "client de passage") return;
+      const e = clientsMap.get(nom.toLowerCase()) || { nom, telephone: "", ca: 0, nb: 0, dernier: "", reste: 0, plusAncienCredit: "" };
+      e.ca += venteTotal(v); e.nb += 1; e.reste += venteReste(v);
+      if (v.telephone) e.telephone = v.telephone;
+      if (v.date && v.date > e.dernier) e.dernier = v.date;
+      if (venteReste(v) > 0 && v.date && (!e.plusAncienCredit || v.date < e.plusAncienCredit)) e.plusAncienCredit = v.date;
+      clientsMap.set(nom.toLowerCase(), e);
+    });
+    const clients = [...clientsMap.values()];
+    const meilleursClients = [...clients].sort((x, y) => y.ca - x.ca).slice(0, 5);
+    const seuilPerdu = ajouterJours(jour, -45);
+    const aRelancer = clients
+      .filter((c) => c.nb >= 2 && c.dernier && c.dernier < seuilPerdu)
+      .sort((x, y) => y.ca - x.ca);
+    const debiteurs = clients.filter((c) => c.reste > 0).sort((x, y) => y.reste - x.reste);
+    const totalCredits = ventes.reduce((s, v) => s + venteReste(v), 0);
+
+    // ---- Meilleurs jours de la semaine ----
+    const noms = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+    const jours = noms.map((n) => ({ jour: n.slice(0, 3), nom: n, ca: 0 }));
+    const ajouterJourSem = (d, montant) => {
+      const x = new Date(d + "T12:00:00");
+      if (!Number.isNaN(x.getTime())) jours[x.getDay()].ca += montant;
+    };
+    vPeriode.forEach((v) => ajouterJourSem(v.date, venteTotal(v)));
+    caisse.filter((t) => dans(dateTicket(t), debut, jour)).forEach((t) => ajouterJourSem(dateTicket(t), ticketTotal(t)));
+    const meilleurJour = [...jours].sort((x, y) => y.ca - x.ca)[0];
+
+    // ---- Marge des bazins teints par l'entreprise (coût réel connu) ----
+    const marges = [];
+    const parStock = new Map();
+    productions.filter((p) => p.enStock && p.stockId).forEach((p) => {
+      const e = parStock.get(p.stockId) || { cout: 0, metres: 0 };
+      e.cout += productionCout(p); e.metres += nbr(p.qteEntree) || nbr(p.metrage);
+      parStock.set(p.stockId, e);
+    });
+    parStock.forEach((e, id) => {
+      const item = stock.find((s) => s.id === id);
+      const vs = ventes.filter((v) => v.stockId === id && nbr(v.metrage) > 0);
+      const m = vs.reduce((s, v) => s + nbr(v.metrage), 0);
+      if (!item || e.metres <= 0 || m <= 0) return;
+      const coutM = e.cout / e.metres;
+      const prixM = vs.reduce((s, v) => s + venteArticles(v), 0) / m;
+      marges.push({ nom: item.nom, coutM, prixM, marge: prixM - coutM, taux: prixM > 0 ? (prixM - coutM) / prixM : 0 });
+    });
+    marges.sort((x, y) => y.taux - x.taux);
+
+    // ---- Teinturiers ----
+    const nomsT = [...new Set(teintures.map((t) => (t.teinturier || "").trim() || "Sans nom"))];
+    const perfs = nomsT
+      .map((n) => {
+        const meme = (x) => ((x.teinturier || "").trim() || "Sans nom").toLowerCase() === n.toLowerCase();
+        return { nom: n, ...perfTeinturier(teintures.filter(meme), productions.filter(meme)) };
+      })
+      .sort((x, y) => y.score - x.score);
+    const retardsTeint = teintures.filter(teintureEnRetard).length + productions.filter(productionEnRetard).length;
+
+    // ---- Actions conseillées, de la plus rentable à la moins urgente ----
+    const actions = [];
+    if (totalCredits > 0)
+      actions.push({
+        tone: "#B23A2E", titre: `Récupérez ${fcfa(totalCredits)} de crédits clients`,
+        detail: `${debiteurs.length} client(s) vous doivent de l'argent${debiteurs[0] ? `, dont ${debiteurs[0].nom} (${fcfa(debiteurs[0].reste)})` : ""}. C'est de l'argent déjà gagné : relancez-les avant de chercher de nouveaux clients.`,
+        bouton: "Relancer par WhatsApp", dest: "rappels",
+      });
+    if (aRecommander.length > 0)
+      actions.push({
+        tone: "#C1652F", titre: `Recommandez ${aRecommander.length} article(s) qui se vendent bien`,
+        detail: `${aRecommander.slice(0, 3).map((s) => `${s.nom} (reste ${s.quantite}, environ ${Math.max(0, Math.round(s.joursRestants))} j)`).join(" · ")}. Une rupture sur un bazin qui marche, c'est une vente perdue.`,
+        bouton: "Voir le stock", dest: "stock",
+      });
+    if (retardsTeint > 0)
+      actions.push({
+        tone: "#B23A2E", titre: `Relancez ${retardsTeint} teinture(s) en retard`,
+        detail: "Un bazin bloqué chez le teinturier est un bazin que vous ne pouvez pas vendre.",
+        bouton: "Voir les teinturiers", dest: "teintures",
+      });
+    if (dort.length > 0)
+      actions.push({
+        tone: "#B9832F", titre: `Écoulez ${fcfa(valeurDort)} de stock qui dort`,
+        detail: `${dort.length} article(s) sans vente depuis 60 jours${dort[0] ? `, dont ${dort[0].nom}` : ""}. Faites une offre limitée (lot, petit rabais, statut WhatsApp, vidéo TikTok) pour retrouver votre argent.`,
+        bouton: "Préparer une vidéo", dest: "tiktok",
+      });
+    if (aRelancer.length > 0)
+      actions.push({
+        tone: "#1F6F5C", titre: `Faites revenir ${aRelancer.length} bon(s) client(s)`,
+        detail: `${aRelancer.slice(0, 3).map((c) => c.nom).join(", ")} ${aRelancer.length > 1 ? "n'ont" : "n'a"} rien acheté depuis plus de 45 jours. Envoyez-leur vos nouveautés : un ancien client achète plus facilement qu'un nouveau.`,
+      });
+    if (parQualite.length > 1 && caArticles > 0)
+      actions.push({
+        tone: "#1F6F5C", titre: `Misez sur « ${parQualite[0].nom} »`,
+        detail: `Cette qualité fait ${pct(parQualite[0].ca / caArticles)} de vos ventes. Gardez-la toujours en stock, avec plusieurs couleurs, et mettez-la en avant dans vos publications.`,
+      });
+    if (perfs.length > 1 && perfs[0].nbTotal > 0)
+      actions.push({
+        tone: "#1F6F5C", titre: `Confiez vos gros lots à ${perfs[0].nom}`,
+        detail: `Meilleure note (${perfs[0].score}/100). ${perfs[perfs.length - 1].nom} a la note la plus basse (${perfs[perfs.length - 1].score}/100) : réduisez ses lots ou renégociez.`,
+        bouton: "Voir le classement", dest: "teintures",
+      });
+    if (evol !== null && evol < -0.1)
+      actions.push({
+        tone: "#B23A2E", titre: `Vos ventes ont baissé de ${pct(-evol)}`,
+        detail: `${fcfa(actuel.ca)} sur les ${periode} derniers jours contre ${fcfa(precedent.ca)} avant. Relancez vos clients et publiez plus souvent cette semaine.`,
+      });
+    if (meilleurJour && meilleurJour.ca > 0)
+      actions.push({
+        tone: "#1B2430", titre: `Votre meilleur jour : le ${meilleurJour.nom.toLowerCase()}`,
+        detail: "Publiez vos nouveautés la veille au soir et assurez-vous d'avoir du stock ce jour-là.",
+      });
+
+    return { actuel, precedent, evol, parQualite, parArticle, caArticles, dort, valeurDort, aRecommander, meilleursClients, aRelancer, debiteurs, totalCredits, jours, marges, actions };
+  }, [periode, ventes, caisse, depenses, paiementsTeint, productions, stock, teintures]);
+
+  const carte = "bg-white border border-[#D8D2C2] rounded-sm p-5";
+  const titre = "bz-serif text-lg font-semibold mb-3";
+  const vide = ventes.length === 0 && caisse.length === 0;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div>
+          <h1 className="bz-serif text-3xl font-semibold">Croissance</h1>
+          <p className="bz-sans text-[#5B5F55]">Ce que vos chiffres disent, et quoi faire pour gagner plus.</p>
+        </div>
+        <div className="flex gap-2">
+          {[[30, "30 jours"], [90, "3 mois"], [365, "1 an"]].map(([n, label]) => (
+            <button key={n} onClick={() => setPeriode(n)}
+              className={`bz-sans text-sm px-3 py-1.5 rounded-sm border ${periode === n ? "bg-[#1B2430] text-white border-[#1B2430]" : "bg-white border-[#D8D2C2] hover:border-[#1F6F5C]"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {vide ? (
+        <div className={carte}>
+          <p className="bz-sans text-sm text-[#5B5F55]">
+            Pas encore de ventes enregistrées. Notez chaque vente dans « Ventes » ou « Caisse », avec le nom et le numéro du client et l'article du stock :
+            après quelques jours, cette page vous dira quoi vendre, qui relancer et où vous gagnez le plus.
+          </p>
+          <button onClick={() => setTab("ventes")} className="bz-sans bg-[#1F6F5C] text-white px-4 py-2 rounded-sm text-sm font-medium mt-3">
+            Enregistrer une vente
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* ---- Chiffres clés ---- */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            <div className={carte + " !p-4"}>
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Chiffre d'affaires</div>
+              <div className="bz-mono text-xl font-medium">{fcfa(a.actuel.ca)}</div>
+              {a.evol !== null && (
+                <div className="bz-sans text-xs mt-1" style={{ color: a.evol >= 0 ? "#1F6F5C" : "#B23A2E" }}>
+                  {a.evol >= 0 ? "▲ +" : "▼ −"}{pct(Math.abs(a.evol))} par rapport à avant
+                </div>
+              )}
+            </div>
+            <div className={carte + " !p-4"}>
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Bénéfice</div>
+              <div className="bz-mono text-xl font-medium" style={{ color: a.actuel.benefice >= 0 ? "#1F6F5C" : "#B23A2E" }}>{fcfa(a.actuel.benefice)}</div>
+              <div className="bz-sans text-xs text-[#9AA0A6] mt-1">charges : {fcfa(a.actuel.charges)}</div>
+            </div>
+            <div className={carte + " !p-4"}>
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Vente moyenne</div>
+              <div className="bz-mono text-xl font-medium">{fcfa(a.actuel.panier)}</div>
+              <div className="bz-sans text-xs text-[#9AA0A6] mt-1">{a.actuel.nbVentes} vente(s)</div>
+            </div>
+            <div className={carte + " !p-4"}>
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">Crédits à récupérer</div>
+              <div className="bz-mono text-xl font-medium" style={{ color: a.totalCredits > 0 ? "#C1652F" : "#1F6F5C" }}>{fcfa(a.totalCredits)}</div>
+              <div className="bz-sans text-xs text-[#9AA0A6] mt-1">{a.debiteurs.length} client(s)</div>
+            </div>
+          </div>
+
+          {/* ---- Actions conseillées ---- */}
+          <div className={carte + " mb-5"}>
+            <h2 className={titre}>À faire pour gagner plus</h2>
+            {a.actions.length === 0 ? (
+              <p className="bz-sans text-sm text-[#1F6F5C]">Rien d'urgent : continuez à enregistrer vos ventes, les conseils s'affineront.</p>
+            ) : (
+              <ol className="flex flex-col gap-3">
+                {a.actions.map((x, i) => (
+                  <li key={i} className="flex gap-3 border-l-4 pl-3" style={{ borderColor: x.tone }}>
+                    <span className="bz-mono text-sm text-[#9AA0A6] pt-0.5">{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="bz-sans font-medium">{x.titre}</div>
+                      <div className="bz-sans text-sm text-[#5B5F55]">{x.detail}</div>
+                      {x.bouton && (
+                        <button onClick={() => setTab(x.dest)} className="bz-sans text-sm text-[#1F6F5C] hover:underline mt-1">{x.bouton} →</button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+            {/* ---- Meilleures ventes ---- */}
+            <div className={carte}>
+              <h2 className={titre}>Ce qui se vend le mieux</h2>
+              {a.parQualite.length === 0 ? (
+                <p className="bz-sans text-sm text-[#9AA0A6]">Aucune vente sur cette période.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {a.parQualite.slice(0, 6).map((q) => (
+                    <div key={q.nom}>
+                      <div className="bz-sans text-sm flex justify-between gap-2">
+                        <span>{q.nom} <span className="text-[#9AA0A6]">· {q.metres} m · {q.nb} vente(s)</span></span>
+                        <span className="bz-mono">{fcfa(q.ca)}</span>
+                      </div>
+                      <div className="h-1.5 bg-[#EFEBDF] rounded-sm mt-1">
+                        <div className="h-1.5 bg-[#1F6F5C] rounded-sm" style={{ width: `${a.caArticles > 0 ? Math.max(2, (q.ca / a.caArticles) * 100) : 0}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {a.parArticle.length > 0 && (
+                <>
+                  <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mt-4 mb-1">Top articles</div>
+                  {a.parArticle.slice(0, 5).map((x) => (
+                    <div key={x.nom} className="bz-sans text-sm flex justify-between gap-2 py-0.5">
+                      <span className="truncate">{x.nom}</span><span className="bz-mono whitespace-nowrap">{fcfa(x.ca)}</span>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+
+            {/* ---- Jours de la semaine ---- */}
+            <div className={carte}>
+              <h2 className={titre}>Vos meilleurs jours</h2>
+              <div style={{ width: "100%", height: 220 }}>
+                <ResponsiveContainer>
+                  <BarChart data={a.jours}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#EFEBDF" vertical={false} />
+                    <XAxis dataKey="jour" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 11 }} width={50} tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : v)} />
+                    <Tooltip formatter={(v) => fcfa(v)} />
+                    <Bar dataKey="ca" name="Ventes" fill="#1F6F5C" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* ---- Clients ---- */}
+            <div className={carte}>
+              <h2 className={titre}>Vos meilleurs clients</h2>
+              {a.meilleursClients.length === 0 ? (
+                <p className="bz-sans text-sm text-[#9AA0A6]">Notez le nom du client à chaque vente pour savoir qui vous rapporte le plus.</p>
+              ) : a.meilleursClients.map((c) => (
+                <div key={c.nom} className="bz-sans text-sm flex justify-between gap-2 py-1 border-b border-[#EFEBDF] last:border-0">
+                  <span>{c.nom} <span className="text-[#9AA0A6]">· {c.nb} achat(s) · dernier le {fmtDate(c.dernier)}</span></span>
+                  <span className="bz-mono whitespace-nowrap">{fcfa(c.ca)}</span>
+                </div>
+              ))}
+              {a.aRelancer.length > 0 && (
+                <>
+                  <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mt-4 mb-1">À faire revenir (plus de 45 jours sans achat)</div>
+                  {a.aRelancer.slice(0, 6).map((c) => (
+                    <div key={c.nom} className="bz-sans text-sm flex justify-between gap-2 py-1">
+                      <span>{c.nom} <span className="text-[#9AA0A6]">· {joursEntre(c.dernier, today())} j</span></span>
+                      <button
+                        onClick={() => ouvrirWhatsApp(c.telephone, `Bonjour ${c.nom}, nous avons reçu de nouveaux bazins. Je vous envoie les photos ?`)}
+                        className="text-[#1F6F5C] hover:underline whitespace-nowrap">WhatsApp</button>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+
+            {/* ---- Stock ---- */}
+            <div className={carte}>
+              <h2 className={titre}>Votre stock</h2>
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">À recommander vite</div>
+              {a.aRecommander.length === 0 ? (
+                <p className="bz-sans text-sm text-[#9AA0A6] mb-3">Aucune rupture en vue sur vos articles qui se vendent.</p>
+              ) : (
+                <div className="mb-3">
+                  {a.aRecommander.slice(0, 5).map((s) => (
+                    <div key={s.id} className="bz-sans text-sm flex justify-between gap-2 py-0.5">
+                      <span className="truncate">{s.nom}</span>
+                      <span className="bz-mono text-[#C1652F] whitespace-nowrap">reste {s.quantite} · {Math.max(0, Math.round(s.joursRestants))} j</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="bz-sans text-xs uppercase tracking-wide text-[#9AA0A6] mb-1">
+                Qui dort depuis 60 jours{a.valeurDort > 0 ? ` · ${fcfa(a.valeurDort)} immobilisés` : ""}
+              </div>
+              {a.dort.length === 0 ? (
+                <p className="bz-sans text-sm text-[#9AA0A6]">Tout votre stock tourne. 👍</p>
+              ) : a.dort.slice(0, 6).map((s) => (
+                <div key={s.id} className="bz-sans text-sm flex justify-between gap-2 py-0.5">
+                  <span className="truncate">{s.nom} <span className="text-[#9AA0A6]">· {s.derniereVente ? `vendu le ${fmtDate(s.derniereVente)}` : "jamais vendu"}</span></span>
+                  <span className="bz-mono whitespace-nowrap">{s.quantite} · {fcfa(s.valeur)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ---- Marges des bazins teints ---- */}
+          {a.marges.length > 0 && (
+            <div className={carte + " mb-5 overflow-x-auto"}>
+              <h2 className={titre}>Marge de vos bazins teints</h2>
+              <table className="w-full text-sm bz-sans" style={{ minWidth: "520px" }}>
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-[#9AA0A6] border-b border-[#D8D2C2]">
+                    <th className="py-2">Article</th>
+                    <th className="py-2 text-right">Coût / m</th>
+                    <th className="py-2 text-right">Vendu / m</th>
+                    <th className="py-2 text-right">Marge / m</th>
+                    <th className="py-2 text-right">Taux</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {a.marges.map((m) => (
+                    <tr key={m.nom} className="border-b border-[#EFEBDF] last:border-0">
+                      <td className="py-2">{m.nom}</td>
+                      <td className="py-2 text-right bz-mono">{fcfa(m.coutM)}</td>
+                      <td className="py-2 text-right bz-mono">{fcfa(m.prixM)}</td>
+                      <td className="py-2 text-right bz-mono" style={{ color: m.marge >= 0 ? "#1F6F5C" : "#B23A2E" }}>{fcfa(m.marge)}</td>
+                      <td className="py-2 text-right bz-mono">{pct(m.taux)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <p className="bz-sans text-xs text-[#9AA0A6]">
+            Ces conseils sont calculés à partir de ce que vous enregistrez. Pour qu'ils soient justes : choisissez l'article du stock à chaque vente,
+            notez le nom et le numéro du client, et saisissez toutes vos dépenses. La marge n'est calculée que pour les bazins passés par « Teinture entreprise », dont le coût réel est connu.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function BilanView({ ventes, caisse, depenses, paiementsTeint = [], productions }) {
   const [mois, setMois] = useState(moisCourant());
 
