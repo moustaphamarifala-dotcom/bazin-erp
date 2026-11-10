@@ -4,6 +4,63 @@ import {
   CLE_DERNIERE_SAUVEGARDE, BandeauSauvegarde, SauvegardeView, RechercheGlobale,
   telechargerSauvegarde, texteDerniereSauvegarde, sauvegardeARappeler,
 } from "./Outils.jsx";
+import {
+  BOUTIQUE_PRINCIPALE, TOUTES, boutiqueDe, listeBoutiques, nomBoutique, fusionnerVue,
+  BoutiquesView, MouvementsView, CodesBarresView, ChampCode, trouverParCode,
+  UtilisateursView, EcranVerrou, ecransAutorises, estPatron,
+} from "./Gestion.jsx";
+
+/* Tous les écrans du menu : [clé, libellé, réservé au patron] */
+const ECRANS = [
+  ["dashboard", "Tableau de bord"],
+  ["croissance", "Croissance"],
+  ["bilan", "Bilan & bénéfice"],
+  ["comptabilite", "Comptabilité"],
+  ["businessplan", "Business plan"],
+  ["tiktok", "Studio TikTok"],
+  ["caisse", "Caisse"],
+  ["rappels", "Rappels WhatsApp"],
+  ["clients", "Clients"],
+  ["fournisseurs", "Fournisseurs"],
+  ["stock", "Stock"],
+  ["mouvements", "Entrées & inventaire"],
+  ["codes", "Codes-barres"],
+  ["docs", "Factures & devis"],
+  ["depenses", "Dépenses"],
+  ["teintures", "Teinturiers"],
+  ["commandes", "Commandes de bazins"],
+  ["production", "Teinture entreprise"],
+  ["ventes", "Ventes"],
+  ["boutiques", "Boutiques", true],
+  ["utilisateurs", "Utilisateurs & accès", true],
+  ["sauvegarde", "Sauvegarde & application"],
+];
+const CLE_SESSION = "bazin:session";
+const lireSession = () => { try { return sessionStorage.getItem(CLE_SESSION) || ""; } catch { return ""; } };
+
+/* Polices et règles d'impression communes à toute l'application */
+function StylesBazin() {
+  return (
+    <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+        .bz-serif { font-family: 'Fraunces', serif; }
+        .bz-sans { font-family: 'Inter', sans-serif; }
+        .bz-mono { font-family: 'IBM Plex Mono', monospace; }
+        .bz-tampon { transform: rotate(-3deg); }
+        .bz-row:hover { background-color: #FBF9F4; }
+        @media print {
+          body * { visibility: hidden; }
+          .bz-print-area, .bz-print-area * { visibility: visible; }
+          .bz-print-area { position: absolute; top: 0; left: 0; width: 100%; }
+          .bz-no-print { display: none !important; }
+          .bz-etiquette { border-color: #999 !important; }
+          body.bz-impression #root { display: none; }
+          .bz-print-root { position: static !important; overflow: visible !important; }
+          .bz-print-root .bz-print-area { position: static; padding: 0; }
+        }
+      `}</style>
+  );
+}
 
 /* ---------- Utilitaires ---------- */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -168,7 +225,7 @@ export default function BazinApp() {
   const [menuOuvert, setMenuOuvert] = useState(false); // menu latéral sur téléphone
   // Résultat de recherche ouvert : la liste du module s'affiche déjà filtrée sur `terme`
   const [recherche, setRecherche] = useState({ tab: "", terme: "", n: 0 });
-  const setTab = (t) => { setRecherche((r) => (r.tab ? { tab: "", terme: "", n: r.n + 1 } : r)); setTabState(t); setMenuOuvert(false); window.scrollTo?.(0, 0); };
+  const setTab = (t) => { if (!autorises.includes(t)) return; setRecherche((r) => (r.tab ? { tab: "", terme: "", n: r.n + 1 } : r)); setTabState(t); setMenuOuvert(false); window.scrollTo?.(0, 0); };
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState("");
   const [printingDoc, setPrintingDoc] = useState(null);
@@ -186,6 +243,11 @@ export default function BazinApp() {
   const [productions, setProductions] = useState([]);
   const [videos, setVideos] = useState([]);
   const [derniereSauvegarde, setDerniereSauvegarde] = useState("");
+  const [boutiques, setBoutiques] = useState([]);
+  const [mouvements, setMouvements] = useState([]);
+  const [utilisateurs, setUtilisateurs] = useState([]);
+  const [boutiqueChoisie, setBoutiqueChoisie] = useState(TOUTES);
+  const [sessionId, setSessionId] = useState(lireSession);
 
   /* ---- chargement initial ---- */
   useEffect(() => {
@@ -198,7 +260,7 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d, dep, t, cmd, v, ca, prod, payT, vid, dernSauv] = await Promise.all([
+      const [c, f, s, d, dep, t, cmd, v, ca, prod, payT, vid, dernSauv, bout, mouv, util, boutChoix] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
@@ -212,6 +274,10 @@ export default function BazinApp() {
         load("bazin:paiementsTeint", []),
         load("bazin:videos", []),
         load(CLE_DERNIERE_SAUVEGARDE, ""),
+        load("bazin:boutiques", []),
+        load("bazin:mouvements", []),
+        load("bazin:utilisateurs", []),
+        load("bazin:boutiqueActive", TOUTES),
       ]);
       setClients(c);
       setFournisseurs(f);
@@ -226,6 +292,10 @@ export default function BazinApp() {
       setPaiementsTeint(payT);
       setVideos(vid);
       setDerniereSauvegarde(typeof dernSauv === "string" ? dernSauv : "");
+      setBoutiques(Array.isArray(bout) ? bout : []);
+      setMouvements(Array.isArray(mouv) ? mouv : []);
+      setUtilisateurs(Array.isArray(util) ? util : []);
+      setBoutiqueChoisie(typeof boutChoix === "string" ? boutChoix : TOUTES);
       setLoading(false);
     })();
   }, []);
@@ -253,8 +323,51 @@ export default function BazinApp() {
   const saveVideos = (next) => { setVideos(next); persist("bazin:videos", next); };
   const saveProductions = (next) => { setProductions(next); persist("bazin:productions", next); };
 
+  const saveBoutiques = (next) => { setBoutiques(next); persist("bazin:boutiques", next); };
+  const saveMouvements = (next) => { setMouvements(next); persist("bazin:mouvements", next); };
+  const saveUtilisateurs = (next) => { setUtilisateurs(next); persist("bazin:utilisateurs", next); };
+
+  /* ---- utilisateurs et écrans autorisés ---- */
+  // Sans aucun compte, l'application reste ouverte comme avant
+  const utilisateur = utilisateurs.find((u) => u.id === sessionId) || null;
+  const verrouille = utilisateurs.length > 0 && !utilisateur;
+  const autorises = ecransAutorises(utilisateur, ECRANS);
+  const ouvrirSession = (id) => { try { sessionStorage.setItem(CLE_SESSION, id); } catch { /* session gardée en mémoire */ } setSessionId(id); };
+  const fermerSession = () => { try { sessionStorage.removeItem(CLE_SESSION); } catch { /* rien */ } setSessionId(""); };
+
+  /* ---- boutiques : le stock, les ventes, la caisse et les dépenses sont tenus par boutique ---- */
+  const toutesBoutiques = listeBoutiques(boutiques);
+  const multiBoutiques = toutesBoutiques.length > 1;
+  const boutiqueImposee = utilisateur && !estPatron(utilisateur) && toutesBoutiques.some((b) => b.id === utilisateur.boutiqueId) ? utilisateur.boutiqueId : "";
+  const boutiqueActive = !multiBoutiques
+    ? TOUTES
+    : boutiqueImposee || (toutesBoutiques.some((b) => b.id === boutiqueChoisie) ? boutiqueChoisie : TOUTES);
+  const choisirBoutique = (id) => { setBoutiqueChoisie(id); persist("bazin:boutiqueActive", id); };
+  const dansBoutique = (x) => boutiqueActive === TOUTES || boutiqueDe(x) === boutiqueActive;
+  const vueDe = (liste) => (boutiqueActive === TOUTES ? liste : liste.filter(dansBoutique));
+  // Enregistre une liste vue par boutique : les nouvelles lignes reçoivent la boutique active et
+  // le nom de l'utilisateur ; les lignes des autres boutiques ne bougent pas.
+  const saveVue = (liste, save) => (next) => {
+    const connus = new Set(liste.map((x) => x.id));
+    const marque = next.map((x) => {
+      if (connus.has(x.id)) return x;
+      const n = { ...x };
+      if (!n.boutiqueId && boutiqueActive !== TOUTES) n.boutiqueId = boutiqueActive;
+      if (utilisateur && !n.par) n.par = utilisateur.nom;
+      return n;
+    });
+    save(boutiqueActive === TOUTES ? marque : fusionnerVue(liste, marque, dansBoutique));
+  };
+  const vStock = vueDe(stock), vVentes = vueDe(ventes), vCaisse = vueDe(caisse), vDepenses = vueDe(depenses);
+  const saveVStock = saveVue(stock, saveStock), saveVVentes = saveVue(ventes, saveVentes);
+  const saveVCaisse = saveVue(caisse, saveCaisse), saveVDepenses = saveVue(depenses, saveDepenses);
+  // La teinture et les commandes sont communes ; leurs frais sont comptés dans la boutique principale
+  const avecCommun = boutiqueActive === TOUTES || boutiqueActive === BOUTIQUE_PRINCIPALE;
+  const cTeintures = avecCommun ? teintures : [], cPaiementsTeint = avecCommun ? paiementsTeint : [];
+  const cProductions = avecCommun ? productions : [], cCommandes = avecCommun ? commandes : [];
+
   /* ---- sauvegarde, restauration, recherche ---- */
-  const donnees = { clients, fournisseurs, stock, docs, depenses, teintures, paiementsTeint, commandes, ventes, caisse, productions, videos };
+  const donnees = { clients, fournisseurs, stock, docs, depenses, teintures, paiementsTeint, commandes, ventes, caisse, productions, videos, boutiques, mouvements, utilisateurs };
   const noterSauvegarde = (dateISO) => { setDerniereSauvegarde(dateISO); persist(CLE_DERNIERE_SAUVEGARDE, dateISO); };
   const sauvegarderMaintenant = () => noterSauvegarde(telechargerSauvegarde(donnees));
   // Remplace les données par celles d'une sauvegarde (seules les parties présentes dans le fichier)
@@ -263,11 +376,12 @@ export default function BazinApp() {
       clients: saveClients, fournisseurs: saveFournisseurs, stock: saveStock, docs: saveDocs,
       depenses: saveDepenses, teintures: saveTeintures, paiementsTeint: savePaiementsTeint,
       commandes: saveCommandes, ventes: saveVentes, caisse: saveCaisse, productions: saveProductions,
-      videos: saveVideos,
+      videos: saveVideos, boutiques: saveBoutiques, mouvements: saveMouvements, utilisateurs: saveUtilisateurs,
     };
     Object.keys(enregistrer).forEach((nom) => { if (Array.isArray(d[nom])) enregistrer[nom](d[nom]); });
   };
   const ouvrirResultat = (t, terme) => {
+    if (!autorises.includes(t)) return;
     setRecherche((r) => ({ tab: t, terme: terme || "", n: r.n + 1 }));
     setTabState(t);
     setMenuOuvert(false);
@@ -277,7 +391,7 @@ export default function BazinApp() {
   const filtreDe = (t) => (recherche.tab === t ? recherche.terme : "");
 
   /* ---- dérivés ---- */
-  const lowStock = stock.filter((s) => Number(s.quantite) <= Number(s.seuilAlerte));
+  const lowStock = vStock.filter((s) => Number(s.quantite) <= Number(s.seuilAlerte));
   const totalDu = docs
     .filter((d) => d.type === "facture" && d.statut !== "payee")
     .reduce((sum, d) => sum + docLignesTotal(d), 0);
@@ -314,22 +428,26 @@ export default function BazinApp() {
     );
   }
 
+  if (verrouille) {
+    return (
+      <>
+        <StylesBazin />
+        <EcranVerrou utilisateurs={utilisateurs}
+          onOuvert={(id, parSecours) => { ouvrirSession(id); if (parSecours) setTabState("utilisateurs"); }} />
+      </>
+    );
+  }
+
+  // Écrans visibles sur cette page, et écran réellement affiché (jamais un écran interdit)
+  const visibles = ECRANS.map(([k]) => k).filter((k) => autorises.includes(k) && (!MODE_TEINTURE || k === "teintures" || k === "production" || k === "sauvegarde"));
+  const ecran = visibles.includes(tab) ? tab : visibles[0] || "";
+  const rechercheDonnees = Object.fromEntries(Object.entries({
+    clients, fournisseurs, stock: vStock, docs, depenses: vDepenses, teintures, commandes, ventes: vVentes, caisse: vCaisse, productions,
+  }).map(([nom, liste]) => [nom, autorises.includes(nom === "productions" ? "production" : nom) ? liste : []]));
+
   return (
     <div className="min-h-screen md:flex bg-[#F0EDE4] text-[#1B2430]">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
-        .bz-serif { font-family: 'Fraunces', serif; }
-        .bz-sans { font-family: 'Inter', sans-serif; }
-        .bz-mono { font-family: 'IBM Plex Mono', monospace; }
-        .bz-tampon { transform: rotate(-3deg); }
-        .bz-row:hover { background-color: #FBF9F4; }
-        @media print {
-          body * { visibility: hidden; }
-          .bz-print-area, .bz-print-area * { visibility: visible; }
-          .bz-print-area { position: absolute; top: 0; left: 0; width: 100%; }
-          .bz-no-print { display: none !important; }
-        }
-      `}</style>
+      <StylesBazin />
 
       {printingDoc && (
         <PrintView doc={printingDoc} clients={clients} onClose={() => setPrintingDoc(null)} />
@@ -353,32 +471,26 @@ export default function BazinApp() {
           <div className="bz-serif text-2xl font-semibold tracking-tight">Bazin</div>
           <div className="bz-mono text-[11px] text-[#9AA0A6] mt-1">{MODE_TEINTURE ? "Espace teinture" : "Registre de gestion"}</div>
         </div>
+        {multiBoutiques && (
+          <div className="px-3 pt-4">
+            {boutiqueImposee ? (
+              <div className="px-3 py-2 bz-sans text-sm text-[#D6A756]">{nomBoutique(boutiques, boutiqueImposee)}</div>
+            ) : (
+              <select value={boutiqueActive} onChange={(e) => choisirBoutique(e.target.value)} aria-label="Boutique affichée"
+                className="w-full bg-[#263242] text-[#F0EDE4] border border-white/15 rounded-sm px-3 py-2 bz-sans text-sm">
+                <option value={TOUTES}>Toutes les boutiques</option>
+                {toutesBoutiques.map((b) => <option key={b.id} value={b.id}>{b.nom}</option>)}
+              </select>
+            )}
+          </div>
+        )}
         <nav className="flex-1 px-3 py-4 flex flex-col gap-1">
-          {[
-            ["dashboard", "Tableau de bord"],
-            ["croissance", "Croissance"],
-            ["bilan", "Bilan & bénéfice"],
-            ["comptabilite", "Comptabilité"],
-            ["businessplan", "Business plan"],
-            ["tiktok", "Studio TikTok"],
-            ["caisse", "Caisse"],
-            ["rappels", "Rappels WhatsApp"],
-            ["clients", "Clients"],
-            ["fournisseurs", "Fournisseurs"],
-            ["stock", "Stock"],
-            ["docs", "Factures & devis"],
-            ["depenses", "Dépenses"],
-            ["teintures", "Teinturiers"],
-            ["commandes", "Commandes de bazins"],
-            ["production", "Teinture entreprise"],
-            ["ventes", "Ventes"],
-            ["sauvegarde", "Sauvegarde & application"],
-          ].filter(([key]) => !MODE_TEINTURE || key === "teintures" || key === "production").map(([key, label]) => (
+          {ECRANS.filter(([key]) => visibles.includes(key)).map(([key, label]) => (
             <button
               key={key}
               onClick={() => setTab(key)}
               className={`text-left px-3 py-2 rounded-sm bz-sans text-sm transition-colors ${
-                tab === key
+                ecran === key
                   ? "bg-[#F0EDE4] text-[#1B2430] font-semibold"
                   : "text-[#D8D2C2] hover:bg-white/5"
               }`}
@@ -391,11 +503,19 @@ export default function BazinApp() {
           className="mx-3 mb-3 px-3 py-2 rounded-sm bz-sans text-sm text-[#D8D2C2] border border-white/15 hover:bg-white/5">
           {MODE_TEINTURE ? "← Application complète" : "Espace teinture à part →"}
         </a>
-        <button onClick={() => setTab("sauvegarde")}
-          className="text-left px-6 py-4 border-t border-white/10 text-[11px] bz-sans hover:bg-white/5"
-          style={{ color: sauvegardeARappeler(donnees, derniereSauvegarde) ? "#E0A64A" : "#9AA0A6" }}>
-          Données sur cet appareil<br />{texteDerniereSauvegarde(derniereSauvegarde)}
-        </button>
+        {utilisateur && (
+          <div className="px-6 py-3 border-t border-white/10 bz-sans text-[12px] text-[#D8D2C2] flex items-center justify-between gap-2">
+            <span>{utilisateur.nom}</span>
+            <button onClick={fermerSession} className="underline text-[#D6A756]">Verrouiller</button>
+          </div>
+        )}
+        {autorises.includes("sauvegarde") && (
+          <button onClick={() => setTab("sauvegarde")}
+            className="text-left px-6 py-4 border-t border-white/10 text-[11px] bz-sans hover:bg-white/5"
+            style={{ color: sauvegardeARappeler(donnees, derniereSauvegarde) ? "#E0A64A" : "#9AA0A6" }}>
+            Données sur cet appareil<br />{texteDerniereSauvegarde(derniereSauvegarde)}
+          </button>
+        )}
       </aside>
 
       {/* ---------- Contenu ---------- */}
@@ -405,91 +525,100 @@ export default function BazinApp() {
             {saveError}
           </div>
         )}
-        {!MODE_TEINTURE && <RechercheGlobale donnees={donnees} onOuvrir={ouvrirResultat} />}
-        {tab !== "sauvegarde" && (
+        {!MODE_TEINTURE && <RechercheGlobale donnees={rechercheDonnees} onOuvrir={ouvrirResultat} />}
+        {ecran !== "sauvegarde" && autorises.includes("sauvegarde") && (
           <BandeauSauvegarde donnees={donnees} derniere={derniereSauvegarde} onSauvegarder={sauvegarderMaintenant} />
         )}
-        {tab === "sauvegarde" && (
+        {ecran === "" && (
+          <p className="bz-sans text-[#5B5F55]">Aucun écran ne vous est ouvert sur cette page. Demandez au patron.</p>
+        )}
+        {ecran === "sauvegarde" && (
           <SauvegardeView donnees={donnees} derniere={derniereSauvegarde} onSauvegarder={noterSauvegarde} restaurer={restaurer} />
         )}
 
-        {tab === "dashboard" && (
+        {ecran === "dashboard" && (
           <Dashboard
             clients={clients}
-            stock={stock}
+            stock={vStock}
             lowStock={lowStock}
-            ventes={ventes}
-            caisse={caisse}
-            teintures={teintures}
-            paiementsTeint={paiementsTeint}
-            commandes={commandes}
-            depenses={depenses}
-            productions={productions}
+            ventes={vVentes}
+            caisse={vCaisse}
+            teintures={cTeintures}
+            paiementsTeint={cPaiementsTeint}
+            commandes={cCommandes}
+            depenses={vDepenses}
+            productions={cProductions}
             setTab={setTab}
           />
         )}
-        {tab === "croissance" && (
-          <CroissanceView ventes={ventes} caisse={caisse} depenses={depenses} paiementsTeint={paiementsTeint}
-            productions={productions} stock={stock} teintures={teintures} setTab={setTab} />
+        {ecran === "croissance" && (
+          <CroissanceView ventes={vVentes} caisse={vCaisse} depenses={vDepenses} paiementsTeint={cPaiementsTeint}
+            productions={cProductions} stock={vStock} teintures={cTeintures} setTab={setTab} />
         )}
-        {tab === "bilan" && (
-          <BilanView
-            ventes={ventes}
-            caisse={caisse}
-            depenses={depenses}
-            paiementsTeint={paiementsTeint}
-            productions={productions}
-          />
+        {ecran === "bilan" && (
+          <BilanView ventes={vVentes} caisse={vCaisse} depenses={vDepenses} paiementsTeint={cPaiementsTeint} productions={cProductions} />
         )}
-        {tab === "comptabilite" && (
-          <ComptabiliteView
-            ventes={ventes}
-            caisse={caisse}
-            depenses={depenses}
-            paiementsTeint={paiementsTeint}
-            productions={productions}
-          />
+        {ecran === "comptabilite" && (
+          <ComptabiliteView ventes={vVentes} caisse={vCaisse} depenses={vDepenses} paiementsTeint={cPaiementsTeint} productions={cProductions} />
         )}
-        {tab === "businessplan" && <BusinessPlanView />}
-        {tab === "tiktok" && <TikTokView videos={videos} saveVideos={saveVideos} />}
-        {tab === "clients" && (
+        {ecran === "businessplan" && <BusinessPlanView />}
+        {ecran === "tiktok" && <TikTokView videos={videos} saveVideos={saveVideos} />}
+        {ecran === "clients" && (
           <ClientsView key={"clients" + recherche.n} initialQuery={filtreDe("clients")} clients={clients} saveClients={saveClients} docs={docs} ventes={ventes} commandes={commandes} />
         )}
-        {tab === "fournisseurs" && (
+        {ecran === "fournisseurs" && (
           <FournisseursView key={"fournisseurs" + recherche.n} initialQuery={filtreDe("fournisseurs")} fournisseurs={fournisseurs} saveFournisseurs={saveFournisseurs} stock={stock} />
         )}
-        {tab === "stock" && <StockView key={"stock" + recherche.n} initialQuery={filtreDe("stock")} stock={stock} saveStock={saveStock} fournisseurs={fournisseurs} />}
-        {tab === "docs" && (
+        {ecran === "stock" && (
+          <StockView key={"stock" + recherche.n + boutiqueActive} initialQuery={filtreDe("stock")} stock={vStock} saveStock={saveVStock} fournisseurs={fournisseurs} />
+        )}
+        {ecran === "mouvements" && (
+          <MouvementsView key={"mouvements" + boutiqueActive} stock={stock} saveStock={saveStock} mouvements={mouvements} saveMouvements={saveMouvements}
+            boutiques={boutiques} boutiqueActive={boutiqueActive} fournisseurs={fournisseurs} utilisateur={utilisateur} setTab={setTab} />
+        )}
+        {ecran === "codes" && (
+          <CodesBarresView key={"codes" + boutiqueActive} stock={stock} saveStock={saveStock} boutiques={boutiques} boutiqueActive={boutiqueActive} />
+        )}
+        {ecran === "docs" && (
           <DocsView
             docs={docs}
             saveDocs={saveDocs}
             clients={clients}
-            stock={stock}
+            stock={vStock}
             docLignesTotal={docLignesTotal}
             onPrint={setPrintingDoc}
             relancer={relancer}
           />
         )}
-        {tab === "depenses" && (
-          <DepensesView key={"depenses" + recherche.n} initialQuery={filtreDe("depenses")} depenses={depenses} saveDepenses={saveDepenses} />
+        {ecran === "depenses" && (
+          <DepensesView key={"depenses" + recherche.n + boutiqueActive} initialQuery={filtreDe("depenses")} depenses={vDepenses} saveDepenses={saveVDepenses} />
         )}
-        {tab === "teintures" && (
+        {ecran === "teintures" && (
           <TeinturesView key={"teintures" + recherche.n} initialQuery={filtreDe("teintures")} teintures={teintures} saveTeintures={saveTeintures} paiements={paiementsTeint} savePaiements={savePaiementsTeint} productions={productions} />
         )}
-        {tab === "commandes" && (
+        {ecran === "commandes" && (
           <CommandesView key={"commandes" + recherche.n} initialQuery={filtreDe("commandes")} commandes={commandes} saveCommandes={saveCommandes} />
         )}
-        {tab === "ventes" && (
-          <VentesView key={"ventes" + recherche.n} initialQuery={filtreDe("ventes")} ventes={ventes} saveVentes={saveVentes} stock={stock} saveStock={saveStock} />
+        {ecran === "ventes" && (
+          <VentesView key={"ventes" + recherche.n + boutiqueActive} initialQuery={filtreDe("ventes")} ventes={vVentes} saveVentes={saveVVentes} stock={vStock} saveStock={saveVStock} />
         )}
-        {tab === "rappels" && (
-          <RappelsView ventes={ventes} commandes={commandes} />
+        {ecran === "rappels" && (
+          <RappelsView ventes={vVentes} commandes={commandes} />
         )}
-        {tab === "caisse" && (
-          <CaisseView caisse={caisse} saveCaisse={saveCaisse} />
+        {ecran === "caisse" && (
+          <CaisseView key={"caisse" + boutiqueActive} caisse={vCaisse} saveCaisse={saveVCaisse} totalTickets={caisse.length} stock={vStock} />
         )}
-        {tab === "production" && (
+        {ecran === "production" && (
+          // La teinture alimente le stock de la boutique principale : elle voit tout le stock
           <ProductionView key={"production" + recherche.n} initialQuery={filtreDe("production")} productions={productions} saveProductions={saveProductions} stock={stock} saveStock={saveStock} />
+        )}
+        {ecran === "boutiques" && (
+          <BoutiquesView boutiques={boutiques} saveBoutiques={saveBoutiques} stock={stock} ventes={ventes} caisse={caisse} depenses={depenses}
+            boutiqueActive={boutiqueActive} choisirBoutique={choisirBoutique} />
+        )}
+        {ecran === "utilisateurs" && (
+          <UtilisateursView utilisateurs={utilisateurs} saveUtilisateurs={saveUtilisateurs} ecrans={ECRANS} boutiques={boutiques}
+            utilisateur={utilisateur} ouvrirSession={ouvrirSession} fermerSession={fermerSession} />
         )}
       </main>
     </div>
@@ -1139,17 +1268,26 @@ function StockView({ stock, saveStock, fournisseurs, initialQuery = "" }) {
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState(initialQuery);
-  const empty = { id: "", nom: "", quantite: 0, prixUnitaire: 0, seuilAlerte: 0, fournisseurId: "" };
+  const empty = { id: "", nom: "", quantite: 0, prixUnitaire: 0, seuilAlerte: 0, fournisseurId: "", categorie: "", famille: "", codeBarres: "", prixVente: "" };
+  const [categorie, setCategorie] = useState("");
+  const categories = useMemo(() => [...new Set(stock.map((s) => (s.categorie || "").trim()).filter(Boolean))].sort(), [stock]);
+  const familles = useMemo(() => [...new Set(stock.map((s) => (s.famille || "").trim()).filter(Boolean))].sort(), [stock]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return stock;
-    return stock.filter((s) => (s.nom || "").toLowerCase().includes(q));
-  }, [stock, query]);
+    return stock.filter((s) =>
+      (!categorie || (s.categorie || "").trim() === categorie) &&
+      (!q || [s.nom, s.categorie, s.famille, s.codeBarres].some((v) => (v || "").toLowerCase().includes(q)))
+    );
+  }, [stock, query, categorie]);
 
   const exportStock = () =>
     exportCSV("bazin-stock.csv", stock, [
       { key: "nom", label: "Article" },
+      { key: "categorie", label: "Catégorie" },
+      { key: "famille", label: "Famille" },
+      { key: "codeBarres", label: "Code-barres" },
+      { key: "prixVente", label: "Prix de vente" },
       { key: "prixUnitaire", label: "Prix unitaire" },
       { key: "quantite", label: "Quantité" },
       { key: "seuilAlerte", label: "Seuil d'alerte" },
@@ -1177,6 +1315,12 @@ function StockView({ stock, saveStock, fournisseurs, initialQuery = "" }) {
         </div>
         <div className="flex gap-2 items-center">
           <SearchBox value={query} onChange={setQuery} placeholder="Rechercher un article…" />
+          {categories.length > 0 && (
+            <select className={inputCls} value={categorie} onChange={(e) => setCategorie(e.target.value)} aria-label="Catégorie">
+              <option value="">Toutes les catégories</option>
+              {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
           <button onClick={exportStock}
             className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
             Exporter CSV
@@ -1213,6 +1357,24 @@ function StockView({ stock, saveStock, fournisseurs, initialQuery = "" }) {
               {fournisseurs.map((f) => <option key={f.id} value={f.id}>{f.nom}</option>)}
             </select>
           </Field>
+          <Field label="Prix de vente conseillé (F CFA)">
+            <input type="number" step="1" min="0" className={inputCls} value={editing.prixVente ?? ""}
+              onChange={(e) => setEditing({ ...editing, prixVente: e.target.value })} />
+          </Field>
+          <Field label="Catégorie">
+            <input list="bz-categories" className={inputCls} value={editing.categorie || ""} placeholder="ex. Getzner, Bazin riche, Brodé"
+              onChange={(e) => setEditing({ ...editing, categorie: e.target.value })} />
+            <datalist id="bz-categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
+          </Field>
+          <Field label="Famille">
+            <input list="bz-familles" className={inputCls} value={editing.famille || ""} placeholder="ex. Tissus blancs, Tissus teints"
+              onChange={(e) => setEditing({ ...editing, famille: e.target.value })} />
+            <datalist id="bz-familles">{familles.map((c) => <option key={c} value={c} />)}</datalist>
+          </Field>
+          <Field label="Code-barres (facultatif)">
+            <input className={inputCls + " bz-mono"} value={editing.codeBarres || ""}
+              onChange={(e) => setEditing({ ...editing, codeBarres: e.target.value.trim().toUpperCase() })} />
+          </Field>
           <div className="col-span-2 flex gap-3 mt-1">
             <button type="submit" className="bz-sans bg-[#1B2430] text-white px-4 py-2 rounded-sm text-sm">
               Enregistrer
@@ -1247,7 +1409,12 @@ function StockView({ stock, saveStock, fournisseurs, initialQuery = "" }) {
                 const low = Number(s.quantite) <= Number(s.seuilAlerte);
                 return (
                   <tr key={s.id} className="bz-row border-b border-[#EFEBDF] last:border-0">
-                    <td className="px-5 py-3 font-medium">{s.nom}</td>
+                    <td className="px-5 py-3 font-medium">
+                      {s.nom}
+                      {(s.categorie || s.famille || s.codeBarres) && (
+                        <div className="text-xs font-normal text-[#9AA0A6]">{[s.categorie, s.famille, s.codeBarres].filter(Boolean).join(" · ")}</div>
+                      )}
+                    </td>
                     <td className="px-5 py-3 bz-mono">{fcfa(s.prixUnitaire)}</td>
                     <td className="px-5 py-3 bz-mono">
                       {s.quantite}
@@ -2573,9 +2740,23 @@ function VentesView({ ventes, saveVentes, stock, saveStock, initialQuery = "" })
     const patch = { stockId };
     if (item) {
       patch.article = item.nom;
-      if (!v.prixMetre) patch.prixMetre = item.prixUnitaire;
+      if (!v.prixMetre) patch.prixMetre = item.prixVente || item.prixUnitaire;
     }
     update(v.id, patch);
+  };
+
+  // Nouvelle vente à partir d'un code-barres tapé ou scanné
+  const vendreParCode = (code) => {
+    const item = trouverParCode(stock, code);
+    if (!item) { alert(`Aucun article avec le code ${code}.`); return; }
+    saveVentes([
+      ...ventes,
+      {
+        id: uid(), date: today(), client: "", telephone: "", stockId: item.id, article: item.nom, qualite: qualites[0],
+        metrage: "", prixMetre: item.prixVente || item.prixUnitaire || "", transport: "", montantPaye: "",
+        modePaiement: modesPaiement[0], deduitStock: false, qteDeduit: 0, notes: "",
+      },
+    ]);
   };
 
   // Déduire / rendre la quantité vendue au stock
@@ -2647,6 +2828,7 @@ function VentesView({ ventes, saveVentes, stock, saveStock, initialQuery = "" })
         </div>
         <div className="flex gap-2 items-center">
           <SearchBox value={query} onChange={setQuery} placeholder="Rechercher une vente…" />
+          {stock.some((s) => s.codeBarres) && <ChampCode onCode={vendreParCode} />}
           <button onClick={exportVentes}
             className="bz-sans px-4 py-2 rounded-sm text-sm border border-[#D8D2C2] hover:bg-white">
             Exporter CSV
@@ -2987,14 +3169,14 @@ function ticketTotal(t) {
   return (t.lignes || []).reduce((s, l) => s + ligneMontant(l), 0);
 }
 
-function CaisseView({ caisse, saveCaisse }) {
+function CaisseView({ caisse, saveCaisse, totalTickets, stock = [] }) {
   const [jour, setJour] = useState(today());
   const [draft, setDraft] = useState(null); // encaissement en cours
   const [recu, setRecu] = useState(null); // ticket affiché en reçu
 
   const nextNumero = () => {
     const year = new Date().getFullYear();
-    return `T-${year}-${String(caisse.length + 1).padStart(3, "0")}`;
+    return `T-${year}-${String((totalTickets ?? caisse.length) + 1).padStart(3, "0")}`;
   };
 
   const nouveau = () =>
@@ -3016,6 +3198,15 @@ function CaisseView({ caisse, saveCaisse }) {
     setDraft({ ...draft, lignes: draft.lignes.map((l, idx) => (idx === i ? { ...l, ...patch } : l)) });
   const rmLigne = (i) =>
     setDraft({ ...draft, lignes: draft.lignes.filter((_, idx) => idx !== i) });
+
+  // Ajoute au ticket l'article dont on tape ou scanne le code-barres
+  const ajouterParCode = (code) => {
+    const item = trouverParCode(stock, code);
+    if (!item) { alert(`Aucun article avec le code ${code}.`); return; }
+    const ligne = { id: uid(), description: item.nom, quantite: 1, prixUnitaire: item.prixVente || item.prixUnitaire || "" };
+    const vides = draft.lignes.filter((l) => !l.description && !l.prixUnitaire);
+    setDraft({ ...draft, lignes: [...draft.lignes.filter((l) => !vides.includes(l)), ligne] });
+  };
 
   const totalDraft = draft ? ticketTotal(draft) : 0;
   const monnaie = draft && draft.mode === "Espèces" && draft.recu !== ""
@@ -3122,9 +3313,12 @@ function CaisseView({ caisse, saveCaisse }) {
               </div>
             ))}
           </div>
-          <button type="button" onClick={addLigne} className="bz-sans text-sm text-[#1F6F5C] hover:underline mb-4">
-            + Ajouter un article
-          </button>
+          <div className="flex flex-wrap items-center gap-4 mb-4">
+            <button type="button" onClick={addLigne} className="bz-sans text-sm text-[#1F6F5C] hover:underline">
+              + Ajouter un article
+            </button>
+            {stock.some((s) => s.codeBarres) && <ChampCode onCode={ajouterParCode} />}
+          </div>
 
           <div className="grid grid-cols-3 gap-4 items-end border-t border-[#EFEBDF] pt-4">
             <Field label="Mode de paiement">

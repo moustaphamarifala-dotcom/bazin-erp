@@ -21,7 +21,12 @@ export const CLES_DONNEES = [
   ["caisse", "bazin:caisse", "Caisse"],
   ["productions", "bazin:productions", "Teinture entreprise"],
   ["videos", "bazin:videos", "Studio TikTok"],
+  ["boutiques", "bazin:boutiques", "Boutiques"],
+  ["mouvements", "bazin:mouvements", "Mouvements de stock"],
+  ["utilisateurs", "bazin:utilisateurs", "Utilisateurs"],
 ];
+/* Réglages et comptes : ils ne comptent pas comme des « enregistrements » à sauvegarder */
+const HORS_COMPTE = new Set(["boutiques", "utilisateurs"]);
 export const CLE_DERNIERE_SAUVEGARDE = "bazin:derniereSauvegarde";
 const CLE_AVANT_RESTAURATION = "bazin:avantRestauration";
 const JOURS_AVANT_RAPPEL = 7;
@@ -41,7 +46,7 @@ const jourISO = (d = new Date()) => {
 
 /* ---------- Sauvegarde : fonctions pures ---------- */
 export function totalEnregistrements(donnees) {
-  return CLES_DONNEES.reduce((s, [nom]) => s + (Array.isArray(donnees[nom]) ? donnees[nom].length : 0), 0);
+  return CLES_DONNEES.reduce((s, [nom]) => s + (!HORS_COMPTE.has(nom) && Array.isArray(donnees[nom]) ? donnees[nom].length : 0), 0);
 }
 
 export function construireSauvegarde(donnees) {

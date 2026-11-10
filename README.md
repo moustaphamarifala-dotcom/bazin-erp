@@ -18,6 +18,17 @@ clients, fournisseurs, stock, factures et devis.
 - **Sauvegarde & restauration** : toutes les données dans un fichier `.json`,
   rappel quand la dernière sauvegarde a plus de 7 jours, aperçu avant de
   restaurer et annulation de la dernière restauration.
+- **Plusieurs boutiques** : stock, ventes, caisse et dépenses tenus par boutique,
+  vue d'ensemble, boutique active choisie dans le menu. Les données saisies
+  avant appartiennent à la « Boutique principale ».
+- **Entrées & inventaire** : arrivages, inventaire, transferts entre boutiques,
+  historique de tous les mouvements ; catégories et familles d'articles.
+- **Codes-barres** (Code 128) : un code par article, étiquettes imprimables,
+  vente et encaissement en tapant ou scannant le code.
+- **Utilisateurs & accès** : comptes avec code PIN (seule l'empreinte est
+  enregistrée), écrans autorisés par employé, boutique imposée, code de secours
+  du patron. Protection locale : les données restent lisibles dans le stockage
+  du navigateur par quelqu'un de technique.
 - **Application installable** : s'ajoute à l'écran d'accueil du téléphone et
   s'ouvre sans connexion (service worker généré au build, voir `public/sw.js`
   et `vite.config.js`).
