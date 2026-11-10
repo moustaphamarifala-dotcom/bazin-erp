@@ -13,8 +13,18 @@ clients, fournisseurs, stock, factures et devis.
   stock, statuts (en attente / envoyé / payé), impression au format A4 (PDF via
   la boîte de dialogue d'impression du navigateur).
 
+- **Recherche globale** : une seule barre pour retrouver un client, un numéro,
+  un tissu, une vente, une commande ou une facture dans tous les modules.
+- **Sauvegarde & restauration** : toutes les données dans un fichier `.json`,
+  rappel quand la dernière sauvegarde a plus de 7 jours, aperçu avant de
+  restaurer et annulation de la dernière restauration.
+- **Application installable** : s'ajoute à l'écran d'accueil du téléphone et
+  s'ouvre sans connexion (service worker généré au build, voir `public/sw.js`
+  et `vite.config.js`).
+
 Les données sont enregistrées localement dans le navigateur (localStorage) —
-aucun serveur n'est requis.
+aucun serveur n'est requis. Elles ne quittent l'appareil que par le fichier de
+sauvegarde.
 
 ## Démarrage
 

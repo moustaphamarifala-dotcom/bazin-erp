@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import {
+  CLE_DERNIERE_SAUVEGARDE, BandeauSauvegarde, SauvegardeView, RechercheGlobale,
+  telechargerSauvegarde, texteDerniereSauvegarde, sauvegardeARappeler,
+} from "./Outils.jsx";
 
 /* ---------- Utilitaires ---------- */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -16,13 +20,17 @@ const fmtDate = (iso) => {
   return `${d}/${m}/${y}`;
 };
 
-/* Indicatif du pays par défaut, ajouté quand le numéro est saisi sans
-   indicatif (ex. 77 123 45 67 → 221771234567). 221 = Sénégal. */
-const INDICATIF_PAYS = "221";
+/* Indicatif du pays par défaut, ajouté quand un numéro local est saisi sans
+   indicatif (ex. 70 12 34 56 → 22670123456). 226 = Burkina Faso, où les
+   numéros locaux ont 8 chiffres. Un numéro plus long est considéré comme
+   déjà complet (indicatif d'un autre pays compris). */
+const INDICATIF_PAYS = "226";
+const LONGUEUR_NUMERO_LOCAL = 8;
 const numeroWhatsApp = (tel) => {
   let d = String(tel || "").replace(/[^\d]/g, "");
+  if (d.startsWith("00")) d = d.slice(2);
   if (!d) return "";
-  if (!d.startsWith(INDICATIF_PAYS) && d.length <= 9) d = INDICATIF_PAYS + d;
+  if (d.length === LONGUEUR_NUMERO_LOCAL) d = INDICATIF_PAYS + d;
   return d;
 };
 const ouvrirWhatsApp = (tel, message) => {
@@ -158,7 +166,9 @@ const MODE_TEINTURE = typeof window !== "undefined" && window.BAZIN_MODE === "te
 export default function BazinApp() {
   const [tab, setTabState] = useState(MODE_TEINTURE ? "teintures" : "dashboard");
   const [menuOuvert, setMenuOuvert] = useState(false); // menu latéral sur téléphone
-  const setTab = (t) => { setTabState(t); setMenuOuvert(false); window.scrollTo?.(0, 0); };
+  // Résultat de recherche ouvert : la liste du module s'affiche déjà filtrée sur `terme`
+  const [recherche, setRecherche] = useState({ tab: "", terme: "", n: 0 });
+  const setTab = (t) => { setRecherche((r) => (r.tab ? { tab: "", terme: "", n: r.n + 1 } : r)); setTabState(t); setMenuOuvert(false); window.scrollTo?.(0, 0); };
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState("");
   const [printingDoc, setPrintingDoc] = useState(null);
@@ -175,6 +185,7 @@ export default function BazinApp() {
   const [caisse, setCaisse] = useState([]);
   const [productions, setProductions] = useState([]);
   const [videos, setVideos] = useState([]);
+  const [derniereSauvegarde, setDerniereSauvegarde] = useState("");
 
   /* ---- chargement initial ---- */
   useEffect(() => {
@@ -187,7 +198,7 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d, dep, t, cmd, v, ca, prod, payT, vid] = await Promise.all([
+      const [c, f, s, d, dep, t, cmd, v, ca, prod, payT, vid, dernSauv] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
@@ -200,6 +211,7 @@ export default function BazinApp() {
         load("bazin:productions", []),
         load("bazin:paiementsTeint", []),
         load("bazin:videos", []),
+        load(CLE_DERNIERE_SAUVEGARDE, ""),
       ]);
       setClients(c);
       setFournisseurs(f);
@@ -213,6 +225,7 @@ export default function BazinApp() {
       setProductions(prod);
       setPaiementsTeint(payT);
       setVideos(vid);
+      setDerniereSauvegarde(typeof dernSauv === "string" ? dernSauv : "");
       setLoading(false);
     })();
   }, []);
@@ -239,6 +252,29 @@ export default function BazinApp() {
   const saveCaisse = (next) => { setCaisse(next); persist("bazin:caisse", next); };
   const saveVideos = (next) => { setVideos(next); persist("bazin:videos", next); };
   const saveProductions = (next) => { setProductions(next); persist("bazin:productions", next); };
+
+  /* ---- sauvegarde, restauration, recherche ---- */
+  const donnees = { clients, fournisseurs, stock, docs, depenses, teintures, paiementsTeint, commandes, ventes, caisse, productions, videos };
+  const noterSauvegarde = (dateISO) => { setDerniereSauvegarde(dateISO); persist(CLE_DERNIERE_SAUVEGARDE, dateISO); };
+  const sauvegarderMaintenant = () => noterSauvegarde(telechargerSauvegarde(donnees));
+  // Remplace les données par celles d'une sauvegarde (seules les parties présentes dans le fichier)
+  const restaurer = (d) => {
+    const enregistrer = {
+      clients: saveClients, fournisseurs: saveFournisseurs, stock: saveStock, docs: saveDocs,
+      depenses: saveDepenses, teintures: saveTeintures, paiementsTeint: savePaiementsTeint,
+      commandes: saveCommandes, ventes: saveVentes, caisse: saveCaisse, productions: saveProductions,
+      videos: saveVideos,
+    };
+    Object.keys(enregistrer).forEach((nom) => { if (Array.isArray(d[nom])) enregistrer[nom](d[nom]); });
+  };
+  const ouvrirResultat = (t, terme) => {
+    setRecherche((r) => ({ tab: t, terme: terme || "", n: r.n + 1 }));
+    setTabState(t);
+    setMenuOuvert(false);
+    window.scrollTo?.(0, 0);
+  };
+  // Texte de départ de la liste d'un module quand on y arrive depuis la recherche
+  const filtreDe = (t) => (recherche.tab === t ? recherche.terme : "");
 
   /* ---- dérivés ---- */
   const lowStock = stock.filter((s) => Number(s.quantite) <= Number(s.seuilAlerte));
@@ -336,6 +372,7 @@ export default function BazinApp() {
             ["commandes", "Commandes de bazins"],
             ["production", "Teinture entreprise"],
             ["ventes", "Ventes"],
+            ["sauvegarde", "Sauvegarde & application"],
           ].filter(([key]) => !MODE_TEINTURE || key === "teintures" || key === "production").map(([key, label]) => (
             <button
               key={key}
@@ -354,9 +391,11 @@ export default function BazinApp() {
           className="mx-3 mb-3 px-3 py-2 rounded-sm bz-sans text-sm text-[#D8D2C2] border border-white/15 hover:bg-white/5">
           {MODE_TEINTURE ? "← Application complète" : "Espace teinture à part →"}
         </a>
-        <div className="px-6 py-4 border-t border-white/10 text-[11px] text-[#9AA0A6] bz-sans">
-          Données enregistrées localement
-        </div>
+        <button onClick={() => setTab("sauvegarde")}
+          className="text-left px-6 py-4 border-t border-white/10 text-[11px] bz-sans hover:bg-white/5"
+          style={{ color: sauvegardeARappeler(donnees, derniereSauvegarde) ? "#E0A64A" : "#9AA0A6" }}>
+          Données sur cet appareil<br />{texteDerniereSauvegarde(derniereSauvegarde)}
+        </button>
       </aside>
 
       {/* ---------- Contenu ---------- */}
@@ -365,6 +404,13 @@ export default function BazinApp() {
           <div className="mb-4 px-4 py-2 bg-[#F3E2D2] border border-[#C1652F] text-[#8A3F14] text-sm rounded-sm bz-sans">
             {saveError}
           </div>
+        )}
+        {!MODE_TEINTURE && <RechercheGlobale donnees={donnees} onOuvrir={ouvrirResultat} />}
+        {tab !== "sauvegarde" && (
+          <BandeauSauvegarde donnees={donnees} derniere={derniereSauvegarde} onSauvegarder={sauvegarderMaintenant} />
+        )}
+        {tab === "sauvegarde" && (
+          <SauvegardeView donnees={donnees} derniere={derniereSauvegarde} onSauvegarder={noterSauvegarde} restaurer={restaurer} />
         )}
 
         {tab === "dashboard" && (
@@ -407,12 +453,12 @@ export default function BazinApp() {
         {tab === "businessplan" && <BusinessPlanView />}
         {tab === "tiktok" && <TikTokView videos={videos} saveVideos={saveVideos} />}
         {tab === "clients" && (
-          <ClientsView clients={clients} saveClients={saveClients} docs={docs} ventes={ventes} commandes={commandes} />
+          <ClientsView key={"clients" + recherche.n} initialQuery={filtreDe("clients")} clients={clients} saveClients={saveClients} docs={docs} ventes={ventes} commandes={commandes} />
         )}
         {tab === "fournisseurs" && (
-          <FournisseursView fournisseurs={fournisseurs} saveFournisseurs={saveFournisseurs} stock={stock} />
+          <FournisseursView key={"fournisseurs" + recherche.n} initialQuery={filtreDe("fournisseurs")} fournisseurs={fournisseurs} saveFournisseurs={saveFournisseurs} stock={stock} />
         )}
-        {tab === "stock" && <StockView stock={stock} saveStock={saveStock} fournisseurs={fournisseurs} />}
+        {tab === "stock" && <StockView key={"stock" + recherche.n} initialQuery={filtreDe("stock")} stock={stock} saveStock={saveStock} fournisseurs={fournisseurs} />}
         {tab === "docs" && (
           <DocsView
             docs={docs}
@@ -425,16 +471,16 @@ export default function BazinApp() {
           />
         )}
         {tab === "depenses" && (
-          <DepensesView depenses={depenses} saveDepenses={saveDepenses} />
+          <DepensesView key={"depenses" + recherche.n} initialQuery={filtreDe("depenses")} depenses={depenses} saveDepenses={saveDepenses} />
         )}
         {tab === "teintures" && (
-          <TeinturesView teintures={teintures} saveTeintures={saveTeintures} paiements={paiementsTeint} savePaiements={savePaiementsTeint} productions={productions} />
+          <TeinturesView key={"teintures" + recherche.n} initialQuery={filtreDe("teintures")} teintures={teintures} saveTeintures={saveTeintures} paiements={paiementsTeint} savePaiements={savePaiementsTeint} productions={productions} />
         )}
         {tab === "commandes" && (
-          <CommandesView commandes={commandes} saveCommandes={saveCommandes} />
+          <CommandesView key={"commandes" + recherche.n} initialQuery={filtreDe("commandes")} commandes={commandes} saveCommandes={saveCommandes} />
         )}
         {tab === "ventes" && (
-          <VentesView ventes={ventes} saveVentes={saveVentes} stock={stock} saveStock={saveStock} />
+          <VentesView key={"ventes" + recherche.n} initialQuery={filtreDe("ventes")} ventes={ventes} saveVentes={saveVentes} stock={stock} saveStock={saveStock} />
         )}
         {tab === "rappels" && (
           <RappelsView ventes={ventes} commandes={commandes} />
@@ -443,7 +489,7 @@ export default function BazinApp() {
           <CaisseView caisse={caisse} saveCaisse={saveCaisse} />
         )}
         {tab === "production" && (
-          <ProductionView productions={productions} saveProductions={saveProductions} stock={stock} saveStock={saveStock} />
+          <ProductionView key={"production" + recherche.n} initialQuery={filtreDe("production")} productions={productions} saveProductions={saveProductions} stock={stock} saveStock={saveStock} />
         )}
       </main>
     </div>
@@ -721,10 +767,10 @@ function Dashboard({ clients, stock, lowStock, ventes, caisse, teintures, paieme
 }
 
 /* ============================================================ */
-function ClientsView({ clients, saveClients, docs, ventes = [], commandes = [] }) {
+function ClientsView({ clients, saveClients, docs, ventes = [], commandes = [], initialQuery = "" }) {
   const [editing, setEditing] = useState(null); // objet client ou null
   const [showForm, setShowForm] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [fiche, setFiche] = useState(null); // client dont on affiche l'historique
   const empty = { id: "", nom: "", contact: "", telephone: "", email: "", adresse: "", notes: "" };
 
@@ -950,10 +996,10 @@ function FicheClient({ client, ventes, commandes, onClose }) {
 }
 
 /* ============================================================ */
-function FournisseursView({ fournisseurs, saveFournisseurs, stock }) {
+function FournisseursView({ fournisseurs, saveFournisseurs, stock, initialQuery = "" }) {
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const empty = { id: "", nom: "", contact: "", telephone: "", email: "", adresse: "", notes: "" };
 
   const filtered = useMemo(() => {
@@ -1089,10 +1135,10 @@ function FournisseursView({ fournisseurs, saveFournisseurs, stock }) {
 }
 
 /* ============================================================ */
-function StockView({ stock, saveStock, fournisseurs }) {
+function StockView({ stock, saveStock, fournisseurs, initialQuery = "" }) {
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const empty = { id: "", nom: "", quantite: 0, prixUnitaire: 0, seuilAlerte: 0, fournisseurId: "" };
 
   const filtered = useMemo(() => {
@@ -1434,10 +1480,10 @@ function DocsView({ docs, saveDocs, clients, stock, docLignesTotal, onPrint, rel
 }
 
 /* ============================================================ */
-function DepensesView({ depenses, saveDepenses }) {
+function DepensesView({ depenses, saveDepenses, initialQuery = "" }) {
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const empty = { id: "", personne: "", libelle: "", montant: 0, date: today(), notes: "" };
 
   const filtered = useMemo(() => {
@@ -1568,8 +1614,8 @@ function DepensesView({ depenses, saveDepenses }) {
 }
 
 /* ============================================================ */
-function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements, productions = [] }) {
-  const [query, setQuery] = useState("");
+function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements, productions = [], initialQuery = "" }) {
+  const [query, setQuery] = useState(initialQuery);
   const [selection, setSelection] = useState(null); // nom du teinturier ouvert
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
@@ -2157,8 +2203,8 @@ function TeinturesView({ teintures, saveTeintures, paiements = [], savePaiements
 }
 
 /* ============================================================ */
-function CommandesView({ commandes, saveCommandes }) {
-  const [query, setQuery] = useState("");
+function CommandesView({ commandes, saveCommandes, initialQuery = "" }) {
+  const [query, setQuery] = useState(initialQuery);
 
   const typesCommande = [
     "Bazin vainqueur Siri Siri",
@@ -2403,8 +2449,8 @@ function CommandesView({ commandes, saveCommandes }) {
 }
 
 /* ============================================================ */
-function VentesView({ ventes, saveVentes, stock, saveStock }) {
-  const [query, setQuery] = useState("");
+function VentesView({ ventes, saveVentes, stock, saveStock, initialQuery = "" }) {
+  const [query, setQuery] = useState(initialQuery);
   const [filtreStatut, setFiltreStatut] = useState("tous");
   const videRapide = { article: "", qualite: "Bazin teint", metrage: "", prixMetre: "", mode: "Espèces" };
   const [rapide, setRapide] = useState(null); // formulaire de vente rapide (client de passage)
@@ -2418,7 +2464,7 @@ function VentesView({ ventes, saveVentes, stock, saveStock }) {
     "Bazin teint",
     "Autre",
   ];
-  const modesPaiement = ["Espèces", "Wave", "Orange Money", "Free Money", "Virement", "Chèque", "Crédit", "Autre"];
+  const modesPaiement = ["Espèces", "Orange Money", "Moov Money", "Wave", "Free Money", "Virement", "Chèque", "Crédit", "Autre"];
 
   const cellText = "w-full bg-transparent px-2 py-1.5 text-sm text-[#1B2430] border border-transparent rounded-sm focus:outline-none focus:border-[#1F6F5C] focus:bg-white";
   const cellSelect = cellText + " cursor-pointer";
@@ -2932,7 +2978,7 @@ function RappelsView({ ventes, commandes }) {
 }
 
 /* ============================================================ */
-const MODES_CAISSE = ["Espèces", "Wave", "Orange Money", "Free Money", "Carte", "Autre"];
+const MODES_CAISSE = ["Espèces", "Orange Money", "Moov Money", "Wave", "Free Money", "Carte", "Autre"];
 
 function ligneMontant(l) {
   return (Number(l.quantite) || 0) * (Number(l.prixUnitaire) || 0);
@@ -3294,8 +3340,8 @@ function RecuView({ ticket, onClose }) {
 }
 
 /* ============================================================ */
-function ProductionView({ productions, saveProductions, stock, saveStock }) {
-  const [query, setQuery] = useState("");
+function ProductionView({ productions, saveProductions, stock, saveStock, initialQuery = "" }) {
+  const [query, setQuery] = useState(initialQuery);
 
   const qualites = ["Vainqueur blanc", "Moins riche blanc", "Riche blanc", "Habillement femme", "Habillement homme"];
 
