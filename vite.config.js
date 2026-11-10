@@ -7,4 +7,6 @@ export default defineConfig({
   // d'un domaine que sous /bazin-erp/ sur GitHub Pages.
   base: "./",
   plugins: [react(), tailwindcss()],
+  // Deux pages : l'application complète et l'espace teinture à part
+  build: { rollupOptions: { input: { main: "index.html", teinture: "teinture.html" } } },
 });

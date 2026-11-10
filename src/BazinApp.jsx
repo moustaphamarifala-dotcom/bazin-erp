@@ -152,8 +152,11 @@ function SearchBox({ value, onChange, placeholder }) {
 }
 
 /* ============================================================ */
+// Mode « teinture seule » : page à part (teinture.html) qui n'affiche que la partie teinture
+const MODE_TEINTURE = typeof window !== "undefined" && window.BAZIN_MODE === "teinture";
+
 export default function BazinApp() {
-  const [tab, setTabState] = useState("dashboard");
+  const [tab, setTabState] = useState(MODE_TEINTURE ? "teintures" : "dashboard");
   const [menuOuvert, setMenuOuvert] = useState(false); // menu latéral sur téléphone
   const setTab = (t) => { setTabState(t); setMenuOuvert(false); window.scrollTo?.(0, 0); };
   const [loading, setLoading] = useState(true);
@@ -298,7 +301,7 @@ export default function BazinApp() {
 
       {/* ---------- Barre du haut (téléphone) ---------- */}
       <div className="md:hidden sticky top-0 z-30 bg-[#1B2430] text-[#F0EDE4] flex items-center justify-between px-4 py-3 bz-no-print">
-        <div className="bz-serif text-xl font-semibold">Bazin</div>
+        <div className="bz-serif text-xl font-semibold">{MODE_TEINTURE ? "Bazin · Teinture" : "Bazin"}</div>
         <button onClick={() => setMenuOuvert(true)} aria-label="Ouvrir le menu"
           className="bz-sans text-sm border border-white/20 rounded-sm px-3 py-1.5">☰ Menu</button>
       </div>
@@ -312,7 +315,7 @@ export default function BazinApp() {
         ${menuOuvert ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="px-6 py-7 border-b border-white/10">
           <div className="bz-serif text-2xl font-semibold tracking-tight">Bazin</div>
-          <div className="bz-mono text-[11px] text-[#9AA0A6] mt-1">Registre de gestion</div>
+          <div className="bz-mono text-[11px] text-[#9AA0A6] mt-1">{MODE_TEINTURE ? "Espace teinture" : "Registre de gestion"}</div>
         </div>
         <nav className="flex-1 px-3 py-4 flex flex-col gap-1">
           {[
@@ -332,7 +335,7 @@ export default function BazinApp() {
             ["commandes", "Commandes de bazins"],
             ["production", "Teinture entreprise"],
             ["ventes", "Ventes"],
-          ].map(([key, label]) => (
+          ].filter(([key]) => !MODE_TEINTURE || key === "teintures" || key === "production").map(([key, label]) => (
             <button
               key={key}
               onClick={() => setTab(key)}
@@ -346,6 +349,10 @@ export default function BazinApp() {
             </button>
           ))}
         </nav>
+        <a href={MODE_TEINTURE ? "./" : "./teinture.html"}
+          className="mx-3 mb-3 px-3 py-2 rounded-sm bz-sans text-sm text-[#D8D2C2] border border-white/15 hover:bg-white/5">
+          {MODE_TEINTURE ? "← Application complète" : "Espace teinture à part →"}
+        </a>
         <div className="px-6 py-4 border-t border-white/10 text-[11px] text-[#9AA0A6] bz-sans">
           Données enregistrées localement
         </div>
