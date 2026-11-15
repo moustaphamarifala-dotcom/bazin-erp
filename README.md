@@ -29,6 +29,11 @@ clients, fournisseurs, stock, factures et devis.
   enregistrée), écrans autorisés par employé, boutique imposée, code de secours
   du patron. Protection locale : les données restent lisibles dans le stockage
   du navigateur par quelqu'un de technique.
+- **Clôture de journée** : le soir, on compte les espèces de la caisse ;
+  l'application calcule ce qui devrait s'y trouver (fond d'ouverture + espèces
+  encaissées − dépenses − versements) et affiche l'écart. Une fiche par jour et
+  par boutique, historique, écarts cumulés sur 30 jours, rapport à envoyer sur
+  WhatsApp. Calculs dans `src/clotureCalcul.js`, testés par `npm test`.
 - **Application installable** : s'ajoute à l'écran d'accueil du téléphone et
   s'ouvre sans connexion (service worker généré au build, voir `public/sw.js`
   et `vite.config.js`).
@@ -44,6 +49,7 @@ npm install
 npm run dev       # serveur de développement
 npm run build     # build de production dans dist/
 npm run preview   # prévisualiser le build
+npm test          # tests des calculs (clôture de journée)
 ```
 
 ## Pile technique

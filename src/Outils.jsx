@@ -24,6 +24,7 @@ export const CLES_DONNEES = [
   ["boutiques", "bazin:boutiques", "Boutiques"],
   ["mouvements", "bazin:mouvements", "Mouvements de stock"],
   ["utilisateurs", "bazin:utilisateurs", "Utilisateurs"],
+  ["clotures", "bazin:clotures", "Clôtures de journée"],
 ];
 /* Réglages et comptes : ils ne comptent pas comme des « enregistrements » à sauvegarder */
 const HORS_COMPTE = new Set(["boutiques", "utilisateurs"]);

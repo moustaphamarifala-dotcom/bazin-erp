@@ -9,6 +9,7 @@ import {
   BoutiquesView, MouvementsView, CodesBarresView, ChampCode, trouverParCode,
   UtilisateursView, EcranVerrou, ecransAutorises, estPatron,
 } from "./Gestion.jsx";
+import { ClotureView } from "./Cloture.jsx";
 
 /* Tous les écrans du menu : [clé, libellé, réservé au patron] */
 const ECRANS = [
@@ -19,6 +20,7 @@ const ECRANS = [
   ["businessplan", "Business plan"],
   ["tiktok", "Studio TikTok"],
   ["caisse", "Caisse"],
+  ["cloture", "Clôture de journée"],
   ["rappels", "Rappels WhatsApp"],
   ["clients", "Clients"],
   ["fournisseurs", "Fournisseurs"],
@@ -246,6 +248,7 @@ export default function BazinApp() {
   const [boutiques, setBoutiques] = useState([]);
   const [mouvements, setMouvements] = useState([]);
   const [utilisateurs, setUtilisateurs] = useState([]);
+  const [clotures, setClotures] = useState([]);
   const [boutiqueChoisie, setBoutiqueChoisie] = useState(TOUTES);
   const [sessionId, setSessionId] = useState(lireSession);
 
@@ -260,7 +263,7 @@ export default function BazinApp() {
           return fallback;
         }
       };
-      const [c, f, s, d, dep, t, cmd, v, ca, prod, payT, vid, dernSauv, bout, mouv, util, boutChoix] = await Promise.all([
+      const [c, f, s, d, dep, t, cmd, v, ca, prod, payT, vid, dernSauv, bout, mouv, util, boutChoix, clo] = await Promise.all([
         load("bazin:clients", []),
         load("bazin:fournisseurs", []),
         load("bazin:stock", []),
@@ -278,6 +281,7 @@ export default function BazinApp() {
         load("bazin:mouvements", []),
         load("bazin:utilisateurs", []),
         load("bazin:boutiqueActive", TOUTES),
+        load("bazin:clotures", []),
       ]);
       setClients(c);
       setFournisseurs(f);
@@ -295,6 +299,7 @@ export default function BazinApp() {
       setBoutiques(Array.isArray(bout) ? bout : []);
       setMouvements(Array.isArray(mouv) ? mouv : []);
       setUtilisateurs(Array.isArray(util) ? util : []);
+      setClotures(Array.isArray(clo) ? clo : []);
       setBoutiqueChoisie(typeof boutChoix === "string" ? boutChoix : TOUTES);
       setLoading(false);
     })();
@@ -326,6 +331,7 @@ export default function BazinApp() {
   const saveBoutiques = (next) => { setBoutiques(next); persist("bazin:boutiques", next); };
   const saveMouvements = (next) => { setMouvements(next); persist("bazin:mouvements", next); };
   const saveUtilisateurs = (next) => { setUtilisateurs(next); persist("bazin:utilisateurs", next); };
+  const saveClotures = (next) => { setClotures(next); persist("bazin:clotures", next); };
 
   /* ---- utilisateurs et écrans autorisés ---- */
   // Sans aucun compte, l'application reste ouverte comme avant
@@ -367,7 +373,7 @@ export default function BazinApp() {
   const cProductions = avecCommun ? productions : [], cCommandes = avecCommun ? commandes : [];
 
   /* ---- sauvegarde, restauration, recherche ---- */
-  const donnees = { clients, fournisseurs, stock, docs, depenses, teintures, paiementsTeint, commandes, ventes, caisse, productions, videos, boutiques, mouvements, utilisateurs };
+  const donnees = { clients, fournisseurs, stock, docs, depenses, teintures, paiementsTeint, commandes, ventes, caisse, productions, videos, boutiques, mouvements, utilisateurs, clotures };
   const noterSauvegarde = (dateISO) => { setDerniereSauvegarde(dateISO); persist(CLE_DERNIERE_SAUVEGARDE, dateISO); };
   const sauvegarderMaintenant = () => noterSauvegarde(telechargerSauvegarde(donnees));
   // Remplace les données par celles d'une sauvegarde (seules les parties présentes dans le fichier)
@@ -377,6 +383,7 @@ export default function BazinApp() {
       depenses: saveDepenses, teintures: saveTeintures, paiementsTeint: savePaiementsTeint,
       commandes: saveCommandes, ventes: saveVentes, caisse: saveCaisse, productions: saveProductions,
       videos: saveVideos, boutiques: saveBoutiques, mouvements: saveMouvements, utilisateurs: saveUtilisateurs,
+      clotures: saveClotures,
     };
     Object.keys(enregistrer).forEach((nom) => { if (Array.isArray(d[nom])) enregistrer[nom](d[nom]); });
   };
@@ -607,6 +614,11 @@ export default function BazinApp() {
         )}
         {ecran === "caisse" && (
           <CaisseView key={"caisse" + boutiqueActive} caisse={vCaisse} saveCaisse={saveVCaisse} totalTickets={caisse.length} stock={vStock} />
+        )}
+        {ecran === "cloture" && (
+          <ClotureView key={"cloture" + boutiqueActive} ventes={vVentes} caisse={vCaisse} depenses={vDepenses} paiementsTeint={cPaiementsTeint}
+            clotures={clotures} saveClotures={saveClotures} boutiques={boutiques} boutiqueActive={boutiqueActive}
+            multiBoutiques={multiBoutiques} utilisateur={utilisateur} />
         )}
         {ecran === "production" && (
           // La teinture alimente le stock de la boutique principale : elle voit tout le stock
