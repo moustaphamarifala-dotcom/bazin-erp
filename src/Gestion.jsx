@@ -721,7 +721,7 @@ export function ecransAutorises(utilisateur, ecrans) {
   return ecrans.filter(([k, , patronSeul]) => !patronSeul && permis.has(k)).map(([k]) => k);
 }
 
-const ECRANS_VENDEUR = ["caisse", "ventes", "rappels", "clients", "stock", "commandes"];
+const ECRANS_VENDEUR = ["caisse", "cloture", "ventes", "rappels", "clients", "stock", "commandes"];
 
 export function UtilisateursView({ utilisateurs, saveUtilisateurs, ecrans, boutiques, utilisateur, ouvrirSession, fermerSession }) {
   const liste = listeBoutiques(boutiques);
